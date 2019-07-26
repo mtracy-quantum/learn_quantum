@@ -81,8 +81,11 @@ def reverse_results(results):
     return new_results.items()
 
 
-def print_reverse_results(results):
-    print('Reversed:', sorted(reverse_results(results)))
+def print_reverse_results(results, label=None):
+    lbl = 'Reversed:'
+    if not label is None:
+        lbl = lbl + label + ':'
+    print(lbl, sorted(reverse_results(results)))
 
 
 def swap_entries(qiskit_array):
@@ -499,7 +502,7 @@ def simulate(QC, shots, seed_simulator=None):
 # Custom Gates
 
 def global_gate(alpha):
-    name = 'G \n' + format_rotation(alpha)
+    name = 'G \n(' + format_rotation(alpha) + ')'
     sub_global = QuantumCircuit(1, name=name)
     sub_global.rz(alpha, 0)
     sub_global.y(0)
@@ -509,7 +512,7 @@ def global_gate(alpha):
 
 
 def rrz_gate(beta):
-    name = 'RRz \n' + format_rotation(beta)
+    name = 'RRz \n(' + format_rotation(beta)+ ')'
     sub_rrz = QuantumCircuit(1, name=name)
     sub_rrz.rz(beta / 2, 0)
     sub_rrz.x(0)
