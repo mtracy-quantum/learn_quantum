@@ -1,4 +1,4 @@
-from math import pi, sqrt
+from math import pi, sqrt, degrees, log
 import fractions as frac
 from cmath import phase
 
@@ -9,6 +9,7 @@ from qiskit import Aer, IBMQ, execute
 
 from qiskit.tools.monitor import job_monitor
 from itertools import groupby
+from itertools import product as iter_product
 import qiskit.quantum_info.synthesis.two_qubit_decompose as twoq
 
 imag = complex(0, 1)
@@ -73,19 +74,58 @@ def get_basis(char_bit):
     raise ValueError('Invalid character passed to get_basis')
 
 
-def reverse_results(results):
+def reverse_results(results, integer=False):
     new_results = {}
     for k, v in results.items():
         k = reverse_string(k)
+        if integer:
+            k = int(k,2)
         new_results[k] = v
     return new_results.items()
 
 
-def print_reverse_results(results, label=None):
+def get_axis(axis, qr, cr):
+    """ Returns a QuantumCircuit given a string such as X, XX, XYZ"""
+    axis = axis.upper()
+    size = len(axis)
+
+    a = QuantumCircuit(qr, cr)
+    for n in range(size):
+        if axis[n] == 'X':
+            a.h(qr[n])
+        if axis[n] == 'Y':
+            a.sdg(qr[n])
+            a.h(qr[n])
+    return a
+
+
+def get_measure(axis, qr, cr):
+    m = get_axis(axis, qr, cr)
+    m.measure(qr, cr)
+    return m
+
+
+def generate_axes(axes, count):
+    """ Returns an array of strings ['XX', 'XZ',...]
+    It splits up the individual characters of axes are premutates count number
+    So XY, 2 returns XX, XY, YX, YY.
+
+    Keyword arguments:
+    axis -- a string of any combination of X, Y, Z -- 'XY', 'XYZ'
+    count -- the number to preumtate over. The returned strings be count characters long
+    qr, cr -- quantum register and classical register for the axis
+    """
+    array_axes = []
+    all_axes = iter_product(axes, repeat=count)
+    for b in all_axes:
+        array_axes.append(''.join(str(i) for i in b))
+    return array_axes
+
+def print_reverse_results(results, label=None, integer=False):
     lbl = 'Reversed:'
     if not label is None:
         lbl = lbl + label + ':'
-    print(lbl, sorted(reverse_results(results)))
+    print(lbl, sorted(reverse_results(results, integer)))
 
 
 def swap_entries(qiskit_array):
@@ -106,7 +146,10 @@ def print_matrix(QC):
 
 
 def show_eigens(QC, bracket_type=None):
-    unitary = what_is_the_matrix(QC)
+    if isinstance(QC, QuantumCircuit):
+        unitary = what_is_the_matrix(QC)
+    else:
+        unitary = QC
     w, v = np.linalg.eig(unitary)
 
     bracket_type = get_bracket_type(bracket_type)
@@ -127,12 +170,19 @@ def what_is_the_matrix(QC):
     return swap_entries(qiskit_array)
 
 
-def show_me_the_matrix(qc, bracket_type=None, factor_out=True, label=None):
+def show_me_the_matrix(qc, bracket_type=None, factor_out=True, normalize=False, label=None):
     unitary = what_is_the_matrix(qc)
     return np_array_to_latex(unitary,
                              bracket_type=get_bracket_type(bracket_type),
                              factor_out=factor_out,
+                             normalize=normalize,
                              label=label)
+
+
+def what_is_the_density_matrix(qc):
+    state_vector = execute_state_vector(qc)
+    sv = state_vector.reshape(1, state_vector.shape[0])
+    return sv.T.conj()@sv
 
 
 def show_density_matrix(qc, bracket_type=None, factor_out=False, label=None):
@@ -153,13 +203,17 @@ def get_bracket_type(bracket_type=None):
     return bracket_type
 
 
-def np_array_to_latex(np_array, bracket_type=None, factor_out=True, label=None, begin_equation=True):
+def np_array_to_latex(np_array, bracket_type=None, factor_out=True, normalize=False, label=None, begin_equation=True):
     rows, cols = np_array.shape
     bracket_type = get_bracket_type(bracket_type)
-    if factor_out:
-        factor = factor_array(np_array)
-        if factor == 0:
-            factor_out = False
+    if normalize:
+        factor = np_array[0][0]
+        factor_out = True
+    else:
+        if factor_out:
+            factor = factor_array(np_array)
+            if factor == 0:
+                factor_out = False
     output = ''
     if begin_equation:
         output = r'\begin{equation*}'
@@ -315,7 +369,7 @@ def show_state_vector(QC, show_zeros=False, label='\psi'):
     is_first = True
     for k, v in sorted(ket_format.items()):
         if not is_first:
-            if v.real >= 0:
+            if v.real > 0:
                 str_state_vector += '+'
             else:
                 if v.real == 0 and v.imag >= 0:
@@ -329,7 +383,7 @@ def show_state_vector(QC, show_zeros=False, label='\psi'):
 def format_state_vector(state_vector, show_zeros=False):
     binary_vector = {}
 
-    bits = int(math.log(len(state_vector), 2))
+    bits = int(log(len(state_vector), 2))
     for n in range(len(state_vector)):
         if show_zeros or state_vector[n] != 0:
             ket = f"{n:b}"  ## get the binary for the cell
@@ -522,7 +576,7 @@ def rrz_gate(beta):
 
 
 def format_rotation(rot):
-    fraction = frac.Fraction(round(math.degrees(rot)), 180).limit_denominator(8)
+    fraction = frac.Fraction(round(degrees(rot)), 180).limit_denominator(8)
     if np.isclose(fraction * pi, rot):
         if fraction < 0:
             sign = '-'
@@ -535,5 +589,32 @@ def format_rotation(rot):
         if ret == '2':
             return sign + '2pi'
         return sign + ret
+    else:
+        return str(rot)
+
+
+def format_rotation_latex(rot):
+    fraction = frac.Fraction(round(degrees(rot)), 180).limit_denominator(8)
+    num = fraction.numerator
+    den = fraction.denominator
+
+    if np.isclose(fraction * pi, rot):
+        if fraction < 0:
+            sign = '-'
+        else:
+            sign = ''
+
+        if num == 0:
+            return r'0'
+
+        if den == 1:
+            if num == 1:
+                return sign + r'\pi'
+            else:
+                return sign + r'%s\pi' % (num)
+
+        if num == 1:
+            return sign + r'\frac{\pi}{%s}' % (den)
+        return sign + r'\frac{%s\pi}{%s}' % (num, den)
     else:
         return str(rot)
