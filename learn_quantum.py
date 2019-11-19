@@ -11,6 +11,7 @@ from qiskit.tools.monitor import job_monitor
 from itertools import groupby
 from itertools import product as iter_product
 import qiskit.quantum_info.synthesis.two_qubit_decompose as twoq
+import matplotlib.pyplot as plt
 
 imag = complex(0, 1)
 
@@ -74,13 +75,14 @@ def get_basis(char_bit):
     raise ValueError('Invalid character passed to get_basis')
 
 
-def reverse_results(results, integer=False):
+def reverse_results(results, integer=False, threshold=0):
     new_results = {}
     for k, v in results.items():
         k = reverse_string(k)
         if integer:
             k = int(k,2)
-        new_results[k] = v
+        if v > threshold:
+            new_results[k] = v
     return new_results.items()
 
 
@@ -107,13 +109,12 @@ def get_measure(axis, qr, cr):
 
 def generate_axes(axes, count):
     """ Returns an array of strings ['XX', 'XZ',...]
-    It splits up the individual characters of axes are premutates count number
-    So XY, 2 returns XX, XY, YX, YY.
+    It splits up the individual characters of axes are permutates count number
+    So (XY, 2) returns XX, XY, YX, YY.
 
     Keyword arguments:
     axis -- a string of any combination of X, Y, Z -- 'XY', 'XYZ'
-    count -- the number to preumtate over. The returned strings be count characters long
-    qr, cr -- quantum register and classical register for the axis
+    count -- the number to permutate over. The returned strings be count characters long
     """
     array_axes = []
     all_axes = iter_product(axes, repeat=count)
@@ -121,11 +122,11 @@ def generate_axes(axes, count):
         array_axes.append(''.join(str(i) for i in b))
     return array_axes
 
-def print_reverse_results(results, label=None, integer=False):
+def print_reverse_results(results, label=None, integer=False, threshold=0):
     lbl = 'Reversed:'
     if not label is None:
         lbl = lbl + label + ':'
-    print(lbl, sorted(reverse_results(results, integer)))
+    print(lbl, sorted(reverse_results(results, integer, threshold)))
 
 
 def swap_entries(qiskit_array):
@@ -296,7 +297,7 @@ def format_float_as_latex(raw):
 
     positive = np.abs(raw)
 
-    f = frac.Fraction(positive).limit_denominator(8)
+    f = frac.Fraction(positive).limit_denominator(16)
     if f.denominator == 1:
         return format_raw(raw)
 
@@ -304,7 +305,7 @@ def format_float_as_latex(raw):
         return sign + r'\frac{' + str(f.numerator) + '}{' + str(f.denominator) + '}'
 
     square = positive ** 2
-    f = frac.Fraction(square).limit_denominator(16)
+    f = frac.Fraction(square).limit_denominator(128)
     if np.isclose(f.numerator / f.denominator, square):
         return sign + r'\frac{' + latex_sqrt(reduce_int_sqrt(f.numerator)) + '}{' + latex_sqrt(
             reduce_int_sqrt(f.denominator)) + '}'
@@ -358,26 +359,12 @@ def reverse_string(str):
     return str[::-1]
 
 
-def print_state_vector(QC):
-    state_vector = execute_state_vector(QC)
-    print(format_state_vector(state_vector))
-
-
-def show_state_vector(QC, show_zeros=False, label='\psi'):
-    str_state_vector = r'\begin{equation*} \vert ' + label + r'\rangle='
-    ket_format = format_state_vector(execute_state_vector(QC), show_zeros)
-    is_first = True
-    for k, v in sorted(ket_format.items()):
-        if not is_first:
-            if v.real > 0:
-                str_state_vector += '+'
-            else:
-                if v.real == 0 and v.imag >= 0:
-                    str_state_vector += '+'
-        is_first = False
-        str_state_vector += format_complex_as_latex(v) + r' \vert' + k + r'\rangle'
-    str_state_vector += r'\end{equation*}'
-    return str_state_vector
+def int_to_binary_string(number, size, reverse=False):
+    binary_string = '{0:b}'.format(number)
+    binary_string = binary_string.rjust(size, '0')
+    if reverse:
+        return binary_string[::-1]
+    return binary_string
 
 
 def format_state_vector(state_vector, show_zeros=False):
@@ -391,6 +378,115 @@ def format_state_vector(state_vector, show_zeros=False):
             ket = reverse_string(ket)
             binary_vector[ket] = state_vector[n]
     return binary_vector
+
+
+def print_state_vector(QC, show_zeros=False, integer=False, split=0):
+    state_vector = execute_state_vector(QC)
+    print_state_array(state_vector, show_zeros=show_zeros, integer=integer, split=split)
+
+
+def print_state_array(state_vector, show_zeros=False, integer=False, split=0):
+    ket_format = format_state_vector(state_vector, show_zeros)
+
+    for k, v in sorted(ket_format.items()):
+        if integer:
+            if split == 0:
+                print('{}|{}>'.format(v, str(int(k, 2))))
+            else:
+                count = len(k)
+                print('{}|{}>|{}>'.format(v, str(int(k[0:split], 2)), str(int(k[split:count], 2))))
+
+        else:
+            print(v, '|', k)
+
+
+def get_array_factor(ket_format_array):
+    amplitudes = []
+    for k, v in (ket_format_array.items()):
+        amplitudes.append(v)
+    return factor_array(np.array(amplitudes).reshape(len(amplitudes), 1))
+
+
+def _format_int_to_kets(binary_string, split, split_color):
+    if split == 0:
+        kets = r' \vert' + r'\textbf{' + str(int(binary_string, 2)) + '}' + r'\rangle'
+    else:
+        ## for now, just do a 2 split
+        count = len(binary_string)
+        kets = r' \vert' + r'\textbf{' + str(int(binary_string[0:split], 2)) + '}' + r'\rangle'
+        if split_color is not None:
+            kets += r'\color{' + split_color + r'}{'
+        kets += r' \vert' + r'\textbf{' + str(int(binary_string[split:count], 2)) + '}' + r'\rangle'
+        if split_color is not None:
+            kets += r'}'
+    return kets
+
+
+def _get_factored_prefix(n_complex):
+    if n_complex.real < 0:
+        return '-'
+    else:
+        if n_complex.imag < 0:
+            return '-i'
+        else:
+            return ''
+
+def show_state_vector(QC, show_zeros=False, integer=False, split=0, split_color=None, factor=True, label='\psi', truncate=128, highlight=-1):
+    str_state_vector = r'\begin{equation*} \vert ' + label + r'\rangle='
+    ket_format = format_state_vector(execute_state_vector(QC), show_zeros)
+    is_first = True
+    is_factored = False
+    if factor:
+        front_factor = get_array_factor(ket_format)
+        if front_factor > 0:
+            is_factored=True
+            str_state_vector += format_complex_as_latex(front_factor) + r'\big('
+    item_count = 0
+    is_highlighted = False
+    vector_length = len(ket_format)
+    truncate_printed = False
+    if len(ket_format) > truncate:
+        truncate_start = truncate//2
+        truncate_stop = vector_length - truncate//2
+    else:
+        truncate_start = vector_length + 1
+        truncate_stop = truncate_start + 1
+    for k, v in sorted(ket_format.items()):
+        item_count += 1
+        if item_count < truncate_start or item_count > truncate_stop:
+
+            if highlight > 0 and item_count % highlight == 0:
+                str_state_vector += r'\color{red}{'
+                is_highlighted = True
+            if not is_first:
+                if v.real > 0:
+                    str_state_vector += '+'
+                else:
+                    if v.real == 0 and v.imag >= 0:
+                        str_state_vector += '+'
+            is_first = False
+            if integer:
+                kets = _format_int_to_kets(k, split, split_color)
+            else:
+                kets = r' \vert' + k + r'\rangle'
+            if is_factored:
+                str_state_vector += _get_factored_prefix(v) + kets
+            else:
+                str_state_vector += format_complex_as_latex(v) + kets
+            if is_highlighted:
+                str_state_vector += r'}'
+                is_highlighted = False
+            ## iPython breaks with equations too long.
+            if item_count % 10 == 0:
+                str_state_vector += r'\end{equation*}' +'\n' + r'\begin{equation*} \quad\quad\quad '
+        else:
+            if truncate_printed == False:
+                str_state_vector += r'\end{equation*} \begin{equation*} ....... \end{equation*} \begin{equation*} \quad\quad\quad'
+                truncate_printed = True
+    if is_factored:
+        str_state_vector += r'\big)'
+    str_state_vector += r'\end{equation*}'
+    return str_state_vector
 
 
 def print_short_state_vector(QC):
@@ -618,3 +714,98 @@ def format_rotation_latex(rot):
         return sign + r'\frac{%s\pi}{%s}' % (num, den)
     else:
         return str(rot)
+
+
+def ints_to_continued_fraction(numerator, denominator):
+    quotients = []
+    while denominator != 0:
+        quotients.append(numerator // denominator)
+        # Use the integer divide and flip method
+        numerator, denominator = denominator, numerator % denominator
+    return quotients
+
+
+def convergent_of_fraction(numerator, denominator, n):
+    quotients = ints_to_continued_fraction(numerator, denominator)
+    if n > len(quotients):
+        n = len(quotients)
+    if n < 2:
+        ## should not be called with depth < 2
+        ## but return an approximation
+        return quotients[n], 1 + quotients[n + 1]
+
+    p_0 = 1
+    p_1 = quotients[0]
+
+    q_0 = 0
+    q_1 = 1
+    for k in range(1, n):
+        p_2 = quotients[k] * p_1 + p_0
+        p_0 = p_1
+        p_1 = p_2
+
+        q_2 = quotients[k] * q_1 + q_0
+        q_0 = q_1
+        q_1 = q_2
+
+    return p_2, q_2
+
+
+def latex_recurse_cfraction(quotients, count, shrink_at=99):
+    if count == len(quotients) - 1:
+        return str(quotients[count])
+    if count > shrink_at:
+        frac_type = r'\; + \; \frac{1}{'
+    else:
+        frac_type = r'\; + \; \cfrac{1}{'
+    return str(quotients[count]) + frac_type + latex_recurse_cfraction(quotients, count + 1, shrink_at) + '}'
+
+
+def latex_continued_fraction(numerator, denominator, shrink_at=99):
+    quotients = ints_to_continued_fraction(numerator, denominator)
+    output = r'\cfrac{' + str(numerator) + '}' + '{' + str(denominator) + '} \; = \; '
+    if quotients[0] > 0:
+        output = output + str(quotients[0]) + '+'
+    output = output + r'\cfrac{1}{' + latex_recurse_cfraction(quotients, 1, shrink_at) + '}'
+    return '$' + output + '$'
+
+def int_to_binary_string(number, size, reverse=False):
+    binary_string = '{0:b}'.format(number)
+    binary_string = binary_string.rjust(size, '0')
+    if reverse:
+        return binary_string[::-1]
+    return binary_string
+
+def format_plot_data(answers, threshold):
+    threshold = 40
+    first_key = next(iter(answers))
+    bit_size = len(first_key)
+    x_axis_data = np.arange(0, 2**bit_size)
+    y_axis_data = []
+    tick_marks = np.arange(0, 2**bit_size, 2**bit_size // 8)
+    last_tick_mark = 0
+    for x in x_axis_data:
+        key = int_to_binary_string(x, bit_size, reverse=True)
+        if key in answers:
+            y_axis_data.append(answers[key])
+            if answers[key] > threshold:
+                if x - last_tick_mark > 8:
+                    tick_marks = np.append(tick_marks, x)
+                    last_tick_mark = x
+        else:
+            y_axis_data.append(0)
+    return x_axis_data, y_axis_data, tick_marks
+
+
+def plot_integer_results(answers, threshold):
+    x_axis_data, y_axis_data, tick_marks = format_plot_data(answers, threshold)
+
+    fig, axes = plt.subplots(1, 1, figsize=(10, 5))
+
+    plt.bar(x_axis_data, y_axis_data)
+    plt.xticks(tick_marks)
+    plt.show()
+
+
+
+
