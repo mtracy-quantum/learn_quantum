@@ -1,4 +1,4 @@
-from math import pi, sqrt, degrees, log
+from math import pi, sqrt, log, log2
 import fractions as frac
 from cmath import phase
 
@@ -12,6 +12,9 @@ from itertools import groupby
 from itertools import product as iter_product
 import qiskit.quantum_info.synthesis.two_qubit_decompose as twoq
 import matplotlib.pyplot as plt
+from sympy import log as sympy_log, re, im
+
+import learn_quantum_constants
 
 imag = complex(0, 1)
 
@@ -40,6 +43,11 @@ cnot10 = np.array([[1, 0, 0, 0],
                    [0, 0, 0, 1],
                    [0, 0, 1, 0],
                    [0, 1, 0, 0]], dtype=complex)
+
+swap =   np.array([[1, 0, 0, 0],
+                   [0, 0, 1, 0],
+                   [0, 1, 0, 0],
+                   [0, 0, 0, 1]], dtype=complex)
 
 # line feed in latex
 llf = r'\begin{equation} \\ \end{equation}'
@@ -107,14 +115,27 @@ def get_measure(axis, qr, cr):
     return m
 
 
+def print_measurements(axes, circuit, qr, cr, shots=1000, seed_simulator=None):
+    size = qr.size
+    array_axes = generate_axes(axes.upper(), size)
+
+    for axis in array_axes:
+        answers = execute_simulated(
+            circuit + get_measure(axis, qr, cr),
+            shots, seed_simulator=seed_simulator)
+        print_reverse_results(answers, label=axis)
+
+
 def generate_axes(axes, count):
     """ Returns an array of strings ['XX', 'XZ',...]
-    It splits up the individual characters of axes are permutates count number
-    So (XY, 2) returns XX, XY, YX, YY.
+    It splits up the individual characters of axes and permutates count times
+    So ('XY', 2) returns XX, XY, YX, YY.
 
     Keyword arguments:
     axis -- a string of any combination of X, Y, Z -- 'XY', 'XYZ'
-    count -- the number to permutate over. The returned strings be count characters long
+    count -- the number to permutate over.
+
+    Returns a string count characters long.
     """
     array_axes = []
     all_axes = iter_product(axes, repeat=count)
@@ -129,14 +150,34 @@ def print_reverse_results(results, label=None, integer=False, threshold=0):
     print(lbl, sorted(reverse_results(results, integer, threshold)))
 
 
+def swap_rows(arr, row_1, row_2):
+    arr[[row_1, row_2], :] = arr[[row_2, row_1], :]
+
+
+def swap_columns(arr, col_1, col_2):
+    arr[:, [col_1, col_2]] = arr[:, [col_2, col_1]]
+
+
 def swap_entries(qiskit_array):
-    half_size = int(qiskit_array.shape[0] / 2)  # always square and powers of 2.
+    size = qiskit_array.shape[0]
+    half_size = int(size / 2)  # always square and powers of 2.
+    bit_size = int(log2(size))
 
-    for n in range(1, half_size, 2):
-        qiskit_array[:, [n, half_size + n - 1]] = qiskit_array[:, [half_size + n - 1, n]]
+    if bit_size <= 4:
+        for n in range(1, half_size, 2):
+            swap_rows(qiskit_array, n, half_size + n - 1)
+        for n in range(1, half_size, 2):
+            swap_columns(qiskit_array, n, half_size + n - 1)
+        return qiskit_array
 
-    for n in range(1, half_size, 2):
-        qiskit_array[[n, half_size + n - 1], :] = qiskit_array[[half_size + n - 1, n], :]
+    map_array = learn_quantum_constants.swap_map[bit_size-4]
+
+    for map_vals in map_array:
+        swap_columns(qiskit_array, map_vals[0], map_vals[1])
+
+    for map_vals in map_array:
+        swap_rows(qiskit_array, map_vals[0], map_vals[1])
+
     return qiskit_array
 
 
@@ -171,13 +212,24 @@ def what_is_the_matrix(QC):
     return swap_entries(qiskit_array)
 
 
-def show_me_the_matrix(qc, bracket_type=None, factor_out=True, normalize=False, label=None):
+def show_me_the_matrix(qc, bracket_type=None, factor_out=True, normalize=False, label=None, display_exp=False):
     unitary = what_is_the_matrix(qc)
+
+    ## limit the size
+    truncated_str = ''
+    if unitary.shape[0]>16:
+        unitary = unitary[0:15, 0:15]
+        truncated_str = r'Max Display Size Exceeded'
     return np_array_to_latex(unitary,
                              bracket_type=get_bracket_type(bracket_type),
                              factor_out=factor_out,
                              normalize=normalize,
-                             label=label)
+                             label=label, display_exp=display_exp)+truncated_str
+
+
+def what_is_the_state_vector(qc):
+    state_vector = execute_state_vector(qc)
+    return state_vector.reshape(state_vector.shape[0], 1)
 
 
 def what_is_the_density_matrix(qc):
@@ -204,11 +256,17 @@ def get_bracket_type(bracket_type=None):
     return bracket_type
 
 
-def np_array_to_latex(np_array, bracket_type=None, factor_out=True, normalize=False, label=None, begin_equation=True):
+def np_array_to_latex(np_array, bracket_type=None, factor_out=True,
+                      normalize=False, label=None, begin_equation=True,
+                      display_exp=False, positive_exp=True):
     rows, cols = np_array.shape
     bracket_type = get_bracket_type(bracket_type)
+
+    # Normalize forces the first term to be 1
     if normalize:
         factor = np_array[0][0]
+        ## only divide by real
+        factor = round(factor.real, 6)
         factor_out = True
     else:
         if factor_out:
@@ -228,7 +286,8 @@ def np_array_to_latex(np_array, bracket_type=None, factor_out=True, normalize=Fa
             current = np_array[i, j]
             if factor_out:
                 current = current / factor
-            output += format_complex_as_latex(current)
+            output += format_complex_as_latex(
+                current, display_exp=display_exp, positive_exp=positive_exp)
             if j < cols - 1:
                 output += ' & '
         output += r' \\ ' + '\n'
@@ -262,55 +321,79 @@ def factor_array(np_array):
     return factor
 
 
-def format_complex_as_latex(complex):
+def format_complex_as_exponent(complex_to_format, positive_exp=True):
+    ## if it is just 1, don't put it into exponent
+    if round(complex_to_format.real, 4) == 1 :
+        return format_complex_as_latex(complex_to_format, display_exp=False)
+
+    exponent = sympy_log(complex_to_format)
+    # if not pure imaginary, don't format as exponent
+    if not round(float(re(exponent)), 4) == 0:
+        return format_complex_as_latex(complex_to_format, display_exp=False)
+
+    # if it can't be converted, just return the raw value
+    latex = format_rotation_latex(float(im(exponent)))
+    if latex == str(float(im(exponent))):
+        return format_complex_as_latex(complex_to_format, display_exp=False)
+
+    return r'e^{' + format_rotation_latex(float(im(exponent)), positive_only=positive_exp)+' i}'
+
+
+def format_complex_as_latex(complex_to_format, display_exp=False, positive_exp=True):
+    if display_exp:
+        return format_complex_as_exponent(complex_to_format, positive_exp=positive_exp)
+
     latex = ''
-    if np.isclose(complex.real, 0):
-        if np.isclose(complex.imag, 0):
+    if np.isclose(complex_to_format.real, 0):
+        if np.isclose(complex_to_format.imag, 0):
             return ' 0 '
         else:
-            if complex.imag < 0:
+            if complex_to_format.imag < 0:
                 latex += '-'
-            if np.isclose(np.abs(complex.imag), 1):
+            if np.isclose(np.abs(complex_to_format.imag), 1):
                 latex += 'i'
             else:
-                latex += format_float_as_latex(np.abs(complex.imag)) + 'i'
+                latex += format_float_as_latex(np.abs(complex_to_format.imag)) + 'i'
     else:
-        latex += format_float_as_latex(complex.real)
-        if np.isclose(complex.imag, 0):
+        latex += format_float_as_latex(complex_to_format.real)
+        if np.isclose(complex_to_format.imag, 0):
             return latex
-        if complex.imag > 0:
+        if complex_to_format.imag > 0:
             latex += '+'
         else:
             latex += '-'
-        if np.isclose(np.abs(complex.imag), 1):
+        if np.isclose(np.abs(complex_to_format.imag), 1):
             latex += 'i'
         else:
-            latex += format_float_as_latex(np.abs(complex.imag)) + 'i'
+            latex += format_float_as_latex(np.abs(complex_to_format.imag)) + 'i'
     return latex
 
 
-def format_float_as_latex(raw):
-    if raw < 0:
+def format_float_as_latex(float_to_format, max_denominator=64):
+    if float_to_format < 0:
         sign = '-'
     else:
         sign = ''
 
-    positive = np.abs(raw)
+    positive = np.abs(float_to_format)
 
-    f = frac.Fraction(positive).limit_denominator(16)
+    f = frac.Fraction(positive).limit_denominator(max_denominator)
     if f.denominator == 1:
-        return format_raw(raw)
+        return format_raw(float_to_format)
 
     if np.isclose(f.numerator / f.denominator, positive):
         return sign + r'\frac{' + str(f.numerator) + '}{' + str(f.denominator) + '}'
 
+    ## handle square roots of fractions
     square = positive ** 2
-    f = frac.Fraction(square).limit_denominator(128)
-    if np.isclose(f.numerator / f.denominator, square):
-        return sign + r'\frac{' + latex_sqrt(reduce_int_sqrt(f.numerator)) + '}{' + latex_sqrt(
-            reduce_int_sqrt(f.denominator)) + '}'
+    f = frac.Fraction(square).limit_denominator(max_denominator**2)
+    ## only format smaller integer fractions
+    if f.numerator <= max_denominator or f.denominator <= max_denominator:
+        if np.isclose(f.numerator / f.denominator, square):
+            return sign + r'\frac{' + latex_sqrt(reduce_int_sqrt(f.numerator)) + '}{' + latex_sqrt(
+                reduce_int_sqrt(f.denominator)) + '}'
 
-    return format_raw(raw)
+    return format_raw(float_to_format)
 
 
 def latex_sqrt(reduce):
@@ -431,12 +514,15 @@ def _get_factored_prefix(n_complex):
         else:
             return ''
 
-def show_state_vector(QC, show_zeros=False, integer=False, split=0, split_color=None, factor=True, label='\psi', truncate=128, highlight=-1):
+
+def show_state_vector(QC, show_zeros=False, integer=False, split=0,
+                      split_color=None, factor_out=True, label='\psi', truncate=128,
+                      highlight=-1, display_exp=False):
     str_state_vector = r'\begin{equation*} \vert ' + label + r'\rangle='
     ket_format = format_state_vector(execute_state_vector(QC), show_zeros)
     is_first = True
     is_factored = False
-    if factor:
+    if factor_out:
         front_factor = get_array_factor(ket_format)
         if front_factor > 0:
             is_factored=True
@@ -472,7 +558,7 @@ def show_state_vector(QC, show_zeros=False, integer=False, split=0, split_color=
             if is_factored:
                 str_state_vector += _get_factored_prefix(v) + kets
             else:
-                str_state_vector += format_complex_as_latex(v) + kets
+                str_state_vector += format_complex_as_latex(v, display_exp=display_exp) + kets
             if is_highlighted:
                 str_state_vector += r'}'
                 is_highlighted = False
@@ -670,10 +756,18 @@ def rrz_gate(beta):
     sub_rrz.x(0)
     return sub_rrz.to_instruction()
 
+def get_rotation_fraction(rotation_in_radians, positive_only=False):
+    rotation_in_radians = rotation_in_radians % (2*np.pi)
+    if positive_only and rotation_in_radians < 0:
+        rotation_in_radians = 2*np.pi + rotation_in_radians
 
-def format_rotation(rot):
-    fraction = frac.Fraction(round(degrees(rot)), 180).limit_denominator(8)
-    if np.isclose(fraction * pi, rot):
+    return frac.Fraction(rotation_in_radians / np.pi).limit_denominator(256)
+
+
+def format_rotation(rotation_in_radians, positive_only=False):
+    fraction = get_rotation_fraction(rotation_in_radians, positive_only=positive_only)
+
+    if np.isclose(np.cos(fraction * pi), np.cos(rotation_in_radians)):
         if fraction < 0:
             sign = '-'
         else:
@@ -686,17 +780,19 @@ def format_rotation(rot):
             return sign + '2pi'
         return sign + ret
     else:
-        return str(rot)
+        return str(rotation_in_radians)
 
 
-def format_rotation_latex(rot):
-    fraction = frac.Fraction(round(degrees(rot)), 180).limit_denominator(8)
+def format_rotation_latex(rotation_in_radians, positive_only=False):
+    fraction = get_rotation_fraction(rotation_in_radians, positive_only=positive_only)
+
     num = fraction.numerator
     den = fraction.denominator
 
-    if np.isclose(fraction * pi, rot):
+    if np.isclose(np.cos(fraction * pi), np.cos(rotation_in_radians)):
         if fraction < 0:
             sign = '-'
+            num = abs(num)
         else:
             sign = ''
 
@@ -713,7 +809,7 @@ def format_rotation_latex(rot):
             return sign + r'\frac{\pi}{%s}' % (den)
         return sign + r'\frac{%s\pi}{%s}' % (num, den)
     else:
-        return str(rot)
+        return str(rotation_in_radians)
 
 
 def ints_to_continued_fraction(numerator, denominator):
@@ -769,6 +865,7 @@ def latex_continued_fraction(numerator, denominator, shrink_at=99):
     output = output + r'\cfrac{1}{' + latex_recurse_cfraction(quotients, 1, shrink_at) + '}'
     return '$' + output + '$'
 
+
 def int_to_binary_string(number, size, reverse=False):
     binary_string = '{0:b}'.format(number)
     binary_string = binary_string.rjust(size, '0')
@@ -776,36 +873,61 @@ def int_to_binary_string(number, size, reverse=False):
         return binary_string[::-1]
     return binary_string
 
-def format_plot_data(answers, threshold):
-    threshold = 40
+
+def format_plot_data(answers, tick_threshold=0, spacing=8, reverse=True, integer=True):
     first_key = next(iter(answers))
     bit_size = len(first_key)
-    x_axis_data = np.arange(0, 2**bit_size)
+
+    if integer:
+        x_axis_data = np.arange(0, 2**bit_size)
+    else:
+        x_list = np.arange(0, 2**bit_size)
+        binary_formater = lambda t: int_to_binary_string(t, bit_size, reverse=reverse)
+        x_axis_data = np.array([binary_formater(x_i) for x_i in x_list])
+
     y_axis_data = []
-    tick_marks = np.arange(0, 2**bit_size, 2**bit_size // 8)
-    last_tick_mark = 0
+    # put a tick mark in the center no matter what
+    tick_marks = [x_axis_data[(2 ** bit_size // 2)]]
+
+    # put first tick mark on first one with data
+    last_tick_mark = -spacing-1
+    count = 0
     for x in x_axis_data:
-        key = int_to_binary_string(x, bit_size, reverse=True)
+        if integer:
+            key = int_to_binary_string(x, bit_size, reverse=reverse)
+        else:
+            key = x
+
         if key in answers:
             y_axis_data.append(answers[key])
-            if answers[key] > threshold:
-                if x - last_tick_mark > 8:
+            if answers[key] > tick_threshold:
+                if count - last_tick_mark > spacing:
                     tick_marks = np.append(tick_marks, x)
-                    last_tick_mark = x
+                    last_tick_mark = count
         else:
             y_axis_data.append(0)
+        count += 1
     return x_axis_data, y_axis_data, tick_marks
 
 
-def plot_integer_results(answers, threshold):
-    x_axis_data, y_axis_data, tick_marks = format_plot_data(answers, threshold)
+def plot_results(answers, tick_threshold=0, fig_size=(10,5),
+                 reverse=True, integer=True, fontsize=14, spacing=8):
+    x_axis_data, y_axis_data, tick_marks \
+        = format_plot_data(answers,
+                           tick_threshold=tick_threshold, reverse=reverse,
+                           integer=integer, spacing=spacing)
 
-    fig, axes = plt.subplots(1, 1, figsize=(10, 5))
+    fig, axes = plt.subplots(1, 1, figsize=fig_size)
+
+    # rotate the binary strings so they display vertically
+    if integer:
+        axes.set_xticklabels(tick_marks, fontsize=fontsize)
+    else:
+        axes.set_xticklabels(tick_marks, fontsize=fontsize, rotation=70)
 
     plt.bar(x_axis_data, y_axis_data)
     plt.xticks(tick_marks)
     plt.show()
-
 
 
 
