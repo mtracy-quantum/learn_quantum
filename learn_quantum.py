@@ -143,6 +143,7 @@ def generate_axes(axes, count):
         array_axes.append(''.join(str(i) for i in b))
     return array_axes
 
+
 def print_reverse_results(results, label=None, integer=False, threshold=0):
     lbl = 'Reversed:'
     if not label is None:
@@ -163,7 +164,7 @@ def swap_entries(qiskit_array):
     half_size = int(size / 2)  # always square and powers of 2.
     bit_size = int(log2(size))
 
-    if bit_size <= 4:
+    if bit_size <= 3:
         for n in range(1, half_size, 2):
             swap_rows(qiskit_array, n, half_size + n - 1)
         for n in range(1, half_size, 2):
