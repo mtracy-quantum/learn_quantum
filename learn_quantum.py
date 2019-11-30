@@ -12,9 +12,7 @@ from itertools import groupby
 from itertools import product as iter_product
 import qiskit.quantum_info.synthesis.two_qubit_decompose as twoq
 import matplotlib.pyplot as plt
-from sympy import log as sympy_log, re, im
-
-import learn_quantum_constants
+from sympy import log as sympy_log, re, im, acos, sin, cos
 
 imag = complex(0, 1)
 
@@ -44,10 +42,10 @@ cnot10 = np.array([[1, 0, 0, 0],
                    [0, 0, 1, 0],
                    [0, 1, 0, 0]], dtype=complex)
 
-swap =   np.array([[1, 0, 0, 0],
-                   [0, 0, 1, 0],
-                   [0, 1, 0, 0],
-                   [0, 0, 0, 1]], dtype=complex)
+swap = np.array([[1, 0, 0, 0],
+                 [0, 0, 1, 0],
+                 [0, 1, 0, 0],
+                 [0, 0, 0, 1]], dtype=complex)
 
 # line feed in latex
 llf = r'\begin{equation} \\ \end{equation}'
@@ -88,7 +86,7 @@ def reverse_results(results, integer=False, threshold=0):
     for k, v in results.items():
         k = reverse_string(k)
         if integer:
-            k = int(k,2)
+            k = int(k, 2)
         if v > threshold:
             new_results[k] = v
     return new_results.items()
@@ -159,25 +157,30 @@ def swap_columns(arr, col_1, col_2):
     arr[:, [col_1, col_2]] = arr[:, [col_2, col_1]]
 
 
+def double_swaps(old):
+    old[::, 1:2] = old[::, 1:2] * 2
+    rows = old.shape[0]
+    for k in range(rows):
+        old = np.append(old, [[old[k, 0] + rows, old[k, 1] + 1]], axis=0)
+    return old
+
+
 def swap_entries(qiskit_array):
     size = qiskit_array.shape[0]
-    half_size = int(size / 2)  # always square and powers of 2.
     bit_size = int(log2(size))
 
-    if bit_size <= 3:
-        for n in range(1, half_size, 2):
-            swap_rows(qiskit_array, n, half_size + n - 1)
-        for n in range(1, half_size, 2):
-            swap_columns(qiskit_array, n, half_size + n - 1)
-        return qiskit_array
+    swap_array = np.array([[0, 0], [1, 1]])
 
-    map_array = learn_quantum_constants.swap_map[bit_size-4]
+    for k in range(bit_size - 1):
+        swap_array = double_swaps(swap_array)
 
-    for map_vals in map_array:
-        swap_columns(qiskit_array, map_vals[0], map_vals[1])
+    for map_vals in swap_array:
+        if map_vals[1] > map_vals[0]:
+            swap_columns(qiskit_array, map_vals[0], map_vals[1])
 
-    for map_vals in map_array:
-        swap_rows(qiskit_array, map_vals[0], map_vals[1])
+    for map_vals in swap_array:
+        if map_vals[1] > map_vals[0]:
+            swap_rows(qiskit_array, map_vals[0], map_vals[1])
 
     return qiskit_array
 
@@ -213,19 +216,20 @@ def what_is_the_matrix(QC):
     return swap_entries(qiskit_array)
 
 
-def show_me_the_matrix(qc, bracket_type=None, factor_out=True, normalize=False, label=None, display_exp=False):
+def show_me_the_matrix(qc, bracket_type=None, factor_out=True,
+                       normalize=False, label=None, display_exp=False):
     unitary = what_is_the_matrix(qc)
 
     ## limit the size
     truncated_str = ''
-    if unitary.shape[0]>16:
+    if unitary.shape[0] > 16:
         unitary = unitary[0:15, 0:15]
         truncated_str = r'Max Display Size Exceeded'
     return np_array_to_latex(unitary,
                              bracket_type=get_bracket_type(bracket_type),
                              factor_out=factor_out,
                              normalize=normalize,
-                             label=label, display_exp=display_exp)+truncated_str
+                             label=label, display_exp=display_exp) + truncated_str
 
 
 def what_is_the_state_vector(qc):
@@ -236,14 +240,14 @@ def what_is_the_state_vector(qc):
 def what_is_the_density_matrix(qc):
     state_vector = execute_state_vector(qc)
     sv = state_vector.reshape(1, state_vector.shape[0])
-    return sv.T.conj()@sv
+    return sv.T.conj() @ sv
 
 
 def show_density_matrix(qc, bracket_type=None, factor_out=False, label=None):
     state_vector = execute_state_vector(qc)
     sv = state_vector.reshape(1, state_vector.shape[0])
-    density_matrix = sv.T.conj()@sv
-    if not np.isclose(np.trace(density_matrix@density_matrix), 1):
+    density_matrix = sv.T.conj() @ sv
+    if not np.isclose(np.trace(density_matrix @ density_matrix), 1):
         return 'Not a pure state -- not implemented for mixed'
     return np_array_to_latex(density_matrix,
                              bracket_type=get_bracket_type(bracket_type),
@@ -260,6 +264,7 @@ def get_bracket_type(bracket_type=None):
 def np_array_to_latex(np_array, bracket_type=None, factor_out=True,
                       normalize=False, label=None, begin_equation=True,
                       display_exp=False, positive_exp=True):
+
     rows, cols = np_array.shape
     bracket_type = get_bracket_type(bracket_type)
 
@@ -324,7 +329,7 @@ def factor_array(np_array):
 
 def format_complex_as_exponent(complex_to_format, positive_exp=True):
     ## if it is just 1, don't put it into exponent
-    if round(complex_to_format.real, 4) == 1 :
+    if round(complex_to_format.real, 4) == 1:
         return format_complex_as_latex(complex_to_format, display_exp=False)
 
     exponent = sympy_log(complex_to_format)
@@ -337,7 +342,7 @@ def format_complex_as_exponent(complex_to_format, positive_exp=True):
     if latex == str(float(im(exponent))):
         return format_complex_as_latex(complex_to_format, display_exp=False)
 
-    return r'e^{' + format_rotation_latex(float(im(exponent)), positive_only=positive_exp)+' i}'
+    return r'e^{' + format_rotation_latex(float(im(exponent)), positive_only=positive_exp) + ' i}'
 
 
 def format_complex_as_latex(complex_to_format, display_exp=False, positive_exp=True):
@@ -387,7 +392,7 @@ def format_float_as_latex(float_to_format, max_denominator=64):
 
     ## handle square roots of fractions
     square = positive ** 2
-    f = frac.Fraction(square).limit_denominator(max_denominator**2)
+    f = frac.Fraction(square).limit_denominator(max_denominator ** 2)
     ## only format smaller integer fractions
     if f.numerator <= max_denominator or f.denominator <= max_denominator:
         if np.isclose(f.numerator / f.denominator, square):
@@ -484,7 +489,7 @@ def print_state_array(state_vector, show_zeros=False, integer=False, split=0):
             print(v, '|', k)
 
 
-def get_array_factor(ket_format_array):
+def _get_array_factor(ket_format_array):
     amplitudes = []
     for k, v in (ket_format_array.items()):
         amplitudes.append(v)
@@ -516,6 +521,50 @@ def _get_factored_prefix(n_complex):
             return ''
 
 
+def get_bloch_angles(state_vector):
+    if state_vector.size > 2:
+        raise ValueError('Only works for single qubits')
+
+    sv = state_vector.reshape(1, state_vector.shape[0])
+    density_matrix = sv.T.conj() @ sv
+
+    w = round(density_matrix[0, 0] - density_matrix[1, 1], 12)
+    ## actually is theta/2
+    theta = float(acos(w))
+
+    u = round(re(density_matrix[0, 1]) * 2, 12)
+
+    # can't divide by 0 in cases of 0,1 or 1,0
+    if w < 1:
+        phi = float(acos(u / sin(theta)))
+    else:
+        phi = 0
+
+    return theta, phi
+
+
+def show_bloch_vector(qc, label='\psi'):
+    state_vector = execute_state_vector(qc)
+
+    theta, phi = get_bloch_angles(state_vector)
+
+
+    l_theta = format_rotation_latex(theta)
+    l_phi = format_rotation_latex(phi)
+
+    str_bloch_vector = r'\begin{equation*} \vert ' + label + r'\rangle='
+    str_bloch_vector += r'cos\left({}\right)'.format(l_theta)
+    str_bloch_vector += r'\vert 0 \rangle +'
+    if phi > 0:
+        str_bloch_vector += r'e^{' + l_phi + r' i}'
+
+    str_bloch_vector += r' sin\left({}\right)'.format(l_theta)
+    str_bloch_vector += r'\vert 1 \rangle'
+    str_bloch_vector += r'\end{equation*}'
+
+    return str_bloch_vector
+
+
 def show_state_vector(QC, show_zeros=False, integer=False, split=0,
                       split_color=None, factor_out=True, label='\psi', truncate=128,
                       highlight=-1, display_exp=False):
@@ -524,17 +573,17 @@ def show_state_vector(QC, show_zeros=False, integer=False, split=0,
     is_first = True
     is_factored = False
     if factor_out:
-        front_factor = get_array_factor(ket_format)
+        front_factor = _get_array_factor(ket_format)
         if front_factor > 0:
-            is_factored=True
+            is_factored = True
             str_state_vector += format_complex_as_latex(front_factor) + r'\big('
     item_count = 0
     is_highlighted = False
     vector_length = len(ket_format)
     truncate_printed = False
     if len(ket_format) > truncate:
-        truncate_start = truncate//2
-        truncate_stop = vector_length - truncate//2
+        truncate_start = truncate // 2
+        truncate_stop = vector_length - truncate // 2
     else:
         truncate_start = vector_length + 1
         truncate_stop = truncate_start + 1
@@ -565,7 +614,7 @@ def show_state_vector(QC, show_zeros=False, integer=False, split=0,
                 is_highlighted = False
             ## iPython breaks with equations too long.
             if item_count % 10 == 0:
-                str_state_vector += r'\end{equation*}' +'\n' + r'\begin{equation*} \quad\quad\quad '
+                str_state_vector += r'\end{equation*}' + '\n' + r'\begin{equation*} \quad\quad\quad '
         else:
             if truncate_printed == False:
                 str_state_vector += r'\end{equation*} \begin{equation*} ....... \end{equation*} \begin{equation*} \quad\quad\quad'
@@ -749,7 +798,7 @@ def global_gate(alpha):
 
 
 def rrz_gate(beta):
-    name = 'RRz \n(' + format_rotation(beta)+ ')'
+    name = 'RRz \n(' + format_rotation(beta) + ')'
     sub_rrz = QuantumCircuit(1, name=name)
     sub_rrz.rz(beta / 2, 0)
     sub_rrz.x(0)
@@ -757,10 +806,11 @@ def rrz_gate(beta):
     sub_rrz.x(0)
     return sub_rrz.to_instruction()
 
+
 def get_rotation_fraction(rotation_in_radians, positive_only=False):
-    rotation_in_radians = rotation_in_radians % (2*np.pi)
+    rotation_in_radians = rotation_in_radians % (2 * np.pi)
     if positive_only and rotation_in_radians < 0:
-        rotation_in_radians = 2*np.pi + rotation_in_radians
+        rotation_in_radians = 2 * np.pi + rotation_in_radians
 
     return frac.Fraction(rotation_in_radians / np.pi).limit_denominator(256)
 
@@ -880,9 +930,9 @@ def format_plot_data(answers, tick_threshold=0, spacing=8, reverse=True, integer
     bit_size = len(first_key)
 
     if integer:
-        x_axis_data = np.arange(0, 2**bit_size)
+        x_axis_data = np.arange(0, 2 ** bit_size)
     else:
-        x_list = np.arange(0, 2**bit_size)
+        x_list = np.arange(0, 2 ** bit_size)
         binary_formater = lambda t: int_to_binary_string(t, bit_size, reverse=reverse)
         x_axis_data = np.array([binary_formater(x_i) for x_i in x_list])
 
@@ -891,7 +941,7 @@ def format_plot_data(answers, tick_threshold=0, spacing=8, reverse=True, integer
     tick_marks = [x_axis_data[(2 ** bit_size // 2)]]
 
     # put first tick mark on first one with data
-    last_tick_mark = -spacing-1
+    last_tick_mark = -spacing - 1
     count = 0
     for x in x_axis_data:
         if integer:
@@ -911,7 +961,7 @@ def format_plot_data(answers, tick_threshold=0, spacing=8, reverse=True, integer
     return x_axis_data, y_axis_data, tick_marks
 
 
-def plot_results(answers, tick_threshold=0, fig_size=(10,5),
+def plot_results(answers, tick_threshold=0, fig_size=(10, 5),
                  reverse=True, integer=True, fontsize=14, spacing=8):
     x_axis_data, y_axis_data, tick_marks \
         = format_plot_data(answers,
@@ -929,6 +979,3 @@ def plot_results(answers, tick_threshold=0, fig_size=(10,5),
     plt.bar(x_axis_data, y_axis_data)
     plt.xticks(tick_marks)
     plt.show()
-
-
-
