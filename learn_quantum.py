@@ -144,7 +144,7 @@ def generate_axes(axes, count):
 
 def print_reverse_results(results, label=None, integer=False, threshold=0):
     lbl = 'Reversed:'
-    if not label is None:
+    if label is not None:
         lbl = lbl + label + ':'
     print(lbl, sorted(reverse_results(results, integer, threshold)))
 
@@ -157,8 +157,11 @@ def swap_columns(arr, col_1, col_2):
     arr[:, [col_1, col_2]] = arr[:, [col_2, col_1]]
 
 
-def double_swaps(old):
+def double_swap_map(old):
+    # First map each entire onto 2x its previous mapping
     old[::, 1:2] = old[::, 1:2] * 2
+    # Then add a mapping for the new entries
+    # copy it to the end and add 1 to the mapping
     rows = old.shape[0]
     for k in range(rows):
         old = np.append(old, [[old[k, 0] + rows, old[k, 1] + 1]], axis=0)
@@ -172,30 +175,27 @@ def swap_entries(qiskit_array):
     swap_array = np.array([[0, 0], [1, 1]])
 
     for k in range(bit_size - 1):
-        swap_array = double_swaps(swap_array)
+        swap_array = double_swap_map(swap_array)
 
     for map_vals in swap_array:
         if map_vals[1] > map_vals[0]:
             swap_columns(qiskit_array, map_vals[0], map_vals[1])
-
-    for map_vals in swap_array:
-        if map_vals[1] > map_vals[0]:
             swap_rows(qiskit_array, map_vals[0], map_vals[1])
 
     return qiskit_array
 
 
-def print_matrix(QC):
+def print_matrix(qc):
     print('Adjusted Matrix:')
     with np.printoptions(linewidth=1024):
-        print(what_is_the_matrix(QC))
+        print(what_is_the_matrix(qc))
 
 
-def show_eigens(QC, bracket_type=None):
-    if isinstance(QC, QuantumCircuit):
-        unitary = what_is_the_matrix(QC)
+def show_eigens(qc, bracket_type=None):
+    if isinstance(qc, QuantumCircuit):
+        unitary = what_is_the_matrix(qc)
     else:
-        unitary = QC
+        unitary = qc
     w, v = np.linalg.eig(unitary)
 
     bracket_type = get_bracket_type(bracket_type)
@@ -211,8 +211,8 @@ def show_eigens(QC, bracket_type=None):
     return output
 
 
-def what_is_the_matrix(QC):
-    qiskit_array = execute_unitary(QC)
+def what_is_the_matrix(qc):
+    qiskit_array = execute_unitary(qc)
     return swap_entries(qiskit_array)
 
 
@@ -220,7 +220,7 @@ def show_me_the_matrix(qc, bracket_type=None, factor_out=True,
                        normalize=False, label=None, display_exp=False):
     unitary = what_is_the_matrix(qc)
 
-    ## limit the size
+    # limit the size
     truncated_str = ''
     if unitary.shape[0] > 16:
         unitary = unitary[0:15, 0:15]
@@ -264,14 +264,13 @@ def get_bracket_type(bracket_type=None):
 def np_array_to_latex(np_array, bracket_type=None, factor_out=True,
                       normalize=False, label=None, begin_equation=True,
                       display_exp=False, positive_exp=True):
-
     rows, cols = np_array.shape
     bracket_type = get_bracket_type(bracket_type)
 
     # Normalize forces the first term to be 1
     if normalize:
         factor = np_array[0][0]
-        ## only divide by real
+        # only divide by real
         factor = round(factor.real, 6)
         factor_out = True
     else:
@@ -328,7 +327,7 @@ def factor_array(np_array):
 
 
 def format_complex_as_exponent(complex_to_format, positive_exp=True):
-    ## if it is just 1, don't put it into exponent
+    # if it is just 1, don't put it into exponent
     if round(complex_to_format.real, 4) == 1:
         return format_complex_as_latex(complex_to_format, display_exp=False)
 
@@ -390,10 +389,10 @@ def format_float_as_latex(float_to_format, max_denominator=64):
     if np.isclose(f.numerator / f.denominator, positive):
         return sign + r'\frac{' + str(f.numerator) + '}{' + str(f.denominator) + '}'
 
-    ## handle square roots of fractions
+    # handle square roots of fractions
     square = positive ** 2
     f = frac.Fraction(square).limit_denominator(max_denominator ** 2)
-    ## only format smaller integer fractions
+    # only format smaller integer fractions
     if f.numerator <= max_denominator or f.denominator <= max_denominator:
         if np.isclose(f.numerator / f.denominator, square):
             return sign + r'\frac{' + latex_sqrt(reduce_int_sqrt(f.numerator)) + '}{' + latex_sqrt(
@@ -414,7 +413,7 @@ def latex_sqrt(reduce):
 
 def format_raw(raw):
     output = np.format_float_positional(raw, precision=4, trim='-')
-    ## doesn't seem to trim properly
+    # doesn't seem to trim properly
     if output[-1] == '.':
         output = output[:-1]
     return output
@@ -444,8 +443,8 @@ def reduce_int_sqrt(n):
     return factor, radical
 
 
-def reverse_string(str):
-    return str[::-1]
+def reverse_string(string):
+    return string[::-1]
 
 
 def int_to_binary_string(number, size, reverse=False):
@@ -462,15 +461,13 @@ def format_state_vector(state_vector, show_zeros=False):
     bits = int(log(len(state_vector), 2))
     for n in range(len(state_vector)):
         if show_zeros or state_vector[n] != 0:
-            ket = f"{n:b}"  ## get the binary for the cell
-            ket = ket.rjust(bits, '0')
-            ket = reverse_string(ket)
-            binary_vector[ket] = state_vector[n]
+            ket_string = int_to_binary_string(n, bits, reverse=True)
+            binary_vector[ket_string] = state_vector[n]
     return binary_vector
 
 
-def print_state_vector(QC, show_zeros=False, integer=False, split=0):
-    state_vector = execute_state_vector(QC)
+def print_state_vector(qc, show_zeros=False, integer=False, split=0):
+    state_vector = execute_state_vector(qc)
     print_state_array(state_vector, show_zeros=show_zeros, integer=integer, split=split)
 
 
@@ -500,7 +497,7 @@ def _format_int_to_kets(binary_string, split, split_color):
     if split == 0:
         kets = r' \vert' + r'\textbf{' + str(int(binary_string, 2)) + '}' + r'\rangle'
     else:
-        ## for now, just do a 2 split
+        # for now, just do a 2 split
         count = len(binary_string)
         kets = r' \vert' + r'\textbf{' + str(int(binary_string[0:split], 2)) + '}' + r'\rangle'
         if split_color is not None:
@@ -529,7 +526,7 @@ def get_bloch_angles(state_vector):
     density_matrix = sv.T.conj() @ sv
 
     w = round(density_matrix[0, 0] - density_matrix[1, 1], 12)
-    ## actually is theta/2
+    # actually is theta/2
     theta = float(acos(w))
 
     u = round(re(density_matrix[0, 1]) * 2, 12)
@@ -548,7 +545,6 @@ def show_bloch_vector(qc, label='\psi'):
 
     theta, phi = get_bloch_angles(state_vector)
 
-
     l_theta = format_rotation_latex(theta)
     l_phi = format_rotation_latex(phi)
 
@@ -565,11 +561,11 @@ def show_bloch_vector(qc, label='\psi'):
     return str_bloch_vector
 
 
-def show_state_vector(QC, show_zeros=False, integer=False, split=0,
+def show_state_vector(qc, show_zeros=False, integer=False, split=0,
                       split_color=None, factor_out=True, label='\psi', truncate=128,
                       highlight=-1, display_exp=False):
     str_state_vector = r'\begin{equation*} \vert ' + label + r'\rangle='
-    ket_format = format_state_vector(execute_state_vector(QC), show_zeros)
+    ket_format = format_state_vector(execute_state_vector(qc), show_zeros)
     is_first = True
     is_factored = False
     if factor_out:
@@ -612,12 +608,14 @@ def show_state_vector(QC, show_zeros=False, integer=False, split=0,
             if is_highlighted:
                 str_state_vector += r'}'
                 is_highlighted = False
-            ## iPython breaks with equations too long.
+            # iPython breaks with equations too long.
             if item_count % 10 == 0:
                 str_state_vector += r'\end{equation*}' + '\n' + r'\begin{equation*} \quad\quad\quad '
         else:
-            if truncate_printed == False:
-                str_state_vector += r'\end{equation*} \begin{equation*} ....... \end{equation*} \begin{equation*} \quad\quad\quad'
+            if not truncate_printed:
+                str_state_vector += r'\end{equation*} \begin{equation*} ' \
+                                    r'....... \end{equation*} \begin{equation*} ' \
+                                    r'\quad\quad\quad '
                 truncate_printed = True
     if is_factored:
         str_state_vector += r'\big)'
@@ -625,8 +623,8 @@ def show_state_vector(QC, show_zeros=False, integer=False, split=0,
     return str_state_vector
 
 
-def print_short_state_vector(QC):
-    ket_format = format_state_vector(execute_state_vector(QC))
+def print_short_state_vector(qc):
+    ket_format = format_state_vector(execute_state_vector(qc))
     for k, v in ket_format.items():
         if v.imag != 0:
             print('{0}+{1}I |{2}> '.format(v.real, v.imag, k))
@@ -745,44 +743,34 @@ def decompose_single_qiskit_raw(unitary_matrix):
     return alpha, theta, lamb, phi
 
 
-def execute_state_vector(QC):
+def execute_state_vector(qc):
     backend = Aer.get_backend('statevector_simulator')
-    results = execute(QC, backend=backend).result()
-    state_vector = results.get_statevector(QC)
-    return state_vector
+    results = execute(qc, backend=backend).result()
+    return results.get_statevector(qc)
 
 
-def execute_unitary(QC):
+def execute_unitary(qc):
     backend = Aer.get_backend('unitary_simulator')
-    results = execute(QC, backend=backend).result()
-    unitary = results.get_unitary(QC)
-    return unitary
+    results = execute(qc, backend=backend).result()
+    return results.get_unitary(qc)
 
 
-def execute_real(QC, strBackend, shots):
-    backend = IBMQ.get_backend(strBackend)
-    job = execute(QC, backend=backend, shots=shots)
+def execute_real(qc, str_backend, shots):
+    backend = IBMQ.get_backend(str_backend)
+    job = execute(qc, backend=backend, shots=shots)
     job_monitor(job)
-
     results = job.result()
-    answer = results.get_counts()
-    return answer
+    return results.get_counts()
 
 
-def execute_seeded(QC, shots):
-    return execute_simulated(QC, shots, 12345)  ## just a number that will always be the same
+def execute_seeded(qc, shots):
+    return execute_simulated(qc, shots, 12345)  # just a number that will always be the same
 
 
-def execute_simulated(QC, shots, seed_simulator=None):
+def execute_simulated(qc, shots, seed_simulator=None):
     backend = Aer.get_backend("qasm_simulator")
-    results = execute(QC, backend=backend, shots=shots, seed_simulator=seed_simulator).result()
-    answer = results.get_counts()
-    return answer
-
-
-def simulate(QC, shots, seed_simulator=None):
-    results = execute_simulated(QC, shots, seed_simulator)
-    print_reverse_results(results)
+    results = execute(qc, backend=backend, shots=shots, seed_simulator=seed_simulator).result()
+    return results.get_counts()
 
 
 # Custom Gates
@@ -854,10 +842,10 @@ def format_rotation_latex(rotation_in_radians, positive_only=False):
             if num == 1:
                 return sign + r'\pi'
             else:
-                return sign + r'%s\pi' % (num)
+                return sign + r'%s\pi' % num
 
         if num == 1:
-            return sign + r'\frac{\pi}{%s}' % (den)
+            return sign + r'\frac{\pi}{%s}' % den
         return sign + r'\frac{%s\pi}{%s}' % (num, den)
     else:
         return str(rotation_in_radians)
@@ -877,8 +865,8 @@ def convergent_of_fraction(numerator, denominator, n):
     if n > len(quotients):
         n = len(quotients)
     if n < 2:
-        ## should not be called with depth < 2
-        ## but return an approximation
+        # should not be called with depth < 2
+        # but return an approximation
         return quotients[n], 1 + quotients[n + 1]
 
     p_0 = 1
@@ -917,14 +905,6 @@ def latex_continued_fraction(numerator, denominator, shrink_at=99):
     return '$' + output + '$'
 
 
-def int_to_binary_string(number, size, reverse=False):
-    binary_string = '{0:b}'.format(number)
-    binary_string = binary_string.rjust(size, '0')
-    if reverse:
-        return binary_string[::-1]
-    return binary_string
-
-
 def format_plot_data(answers, tick_threshold=0, spacing=8, reverse=True, integer=True):
     first_key = next(iter(answers))
     bit_size = len(first_key)
@@ -936,7 +916,7 @@ def format_plot_data(answers, tick_threshold=0, spacing=8, reverse=True, integer
         binary_formater = lambda t: int_to_binary_string(t, bit_size, reverse=reverse)
         x_axis_data = np.array([binary_formater(x_i) for x_i in x_list])
 
-    y_axis_data = []
+    y_axis_data = np.zeros(2 ** bit_size)
     # put a tick mark in the center no matter what
     tick_marks = [x_axis_data[(2 ** bit_size // 2)]]
 
@@ -950,13 +930,11 @@ def format_plot_data(answers, tick_threshold=0, spacing=8, reverse=True, integer
             key = x
 
         if key in answers:
-            y_axis_data.append(answers[key])
+            y_axis_data[x] = answers[key]
             if answers[key] > tick_threshold:
                 if count - last_tick_mark > spacing:
                     tick_marks = np.append(tick_marks, x)
                     last_tick_mark = count
-        else:
-            y_axis_data.append(0)
         count += 1
     return x_axis_data, y_axis_data, tick_marks
 
