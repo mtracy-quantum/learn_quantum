@@ -8,11 +8,14 @@ import numpy as np
 from qiskit import Aer, IBMQ, execute
 
 from qiskit.tools.monitor import job_monitor
+from qiskit.quantum_info.operators.pauli import Pauli
 from itertools import groupby
 from itertools import product as iter_product
 import qiskit.quantum_info.synthesis.two_qubit_decompose as twoq
 import matplotlib.pyplot as plt
-from sympy import log as sympy_log, re, im, acos, sin, cos
+from sympy import log as sympy_log, re, im, acos, atan, sin, cos
+
+from IPython.display import Latex, display
 
 imag = complex(0, 1)
 
@@ -203,12 +206,13 @@ def show_eigens(qc, bracket_type=None):
     for n in range(w.shape[0]):
         output += r'\lambda_' + str(n) + '=' + format_complex_as_latex(w[n])
         output += r',\; '
-        output += np_array_to_latex(v[n].reshape(v[n].shape[0], 1),
-                                    bracket_type=bracket_type, factor_out=False, begin_equation=False,
+        output += np_array_to_latex(v[:, n].reshape(v[:, n].shape[0], 1),
+                                    bracket_type=bracket_type, factor_out=True, begin_equation=False,
                                     label='v_' + str(n))
         output += r'\quad'
     output += r'\end{equation*}'
-    return output
+
+    display(Latex(output))
 
 
 def what_is_the_matrix(qc):
@@ -225,11 +229,11 @@ def show_me_the_matrix(qc, bracket_type=None, factor_out=True,
     if unitary.shape[0] > 16:
         unitary = unitary[0:15, 0:15]
         truncated_str = r'Max Display Size Exceeded'
-    return np_array_to_latex(unitary,
+    display(Latex(np_array_to_latex(unitary,
                              bracket_type=get_bracket_type(bracket_type),
                              factor_out=factor_out,
                              normalize=normalize,
-                             label=label, display_exp=display_exp) + truncated_str
+                             label=label, display_exp=display_exp) + truncated_str ))
 
 
 def what_is_the_state_vector(qc):
@@ -249,16 +253,25 @@ def show_density_matrix(qc, bracket_type=None, factor_out=False, label=None):
     density_matrix = sv.T.conj() @ sv
     if not np.isclose(np.trace(density_matrix @ density_matrix), 1):
         return 'Not a pure state -- not implemented for mixed'
-    return np_array_to_latex(density_matrix,
-                             bracket_type=get_bracket_type(bracket_type),
-                             factor_out=factor_out,
-                             label=label)
+
+    display(Latex(np_array_to_latex(density_matrix,
+                                    bracket_type=get_bracket_type(bracket_type),
+                                    factor_out=factor_out,
+                                    label=label) ))
 
 
 def get_bracket_type(bracket_type=None):
     if bracket_type is None:
         return default_bracket_type
     return bracket_type
+
+
+def show_array(np_array, bracket_type=None, factor_out=True,
+                      normalize=False, label=None, begin_equation=True,
+                      display_exp=False, positive_exp=True):
+    display(Latex(np_array_to_latex(np_array, bracket_type=bracket_type, factor_out=factor_out,
+                                    normalize=normalize, label=label, begin_equation=begin_equation,
+                                    display_exp=display_exp, positive_exp=positive_exp)))
 
 
 def np_array_to_latex(np_array, bracket_type=None, factor_out=True,
@@ -275,7 +288,7 @@ def np_array_to_latex(np_array, bracket_type=None, factor_out=True,
         factor_out = True
     else:
         if factor_out:
-            factor = factor_array(np_array)
+            factor = _factor_array(np_array)
             if factor == 0:
                 factor_out = False
     output = ''
@@ -302,7 +315,7 @@ def np_array_to_latex(np_array, bracket_type=None, factor_out=True,
     return output
 
 
-def factor_array(np_array):
+def _factor_array(np_array):
     factor = 0
 
     rows, cols = np_array.shape
@@ -490,7 +503,7 @@ def _get_array_factor(ket_format_array):
     amplitudes = []
     for k, v in (ket_format_array.items()):
         amplitudes.append(v)
-    return factor_array(np.array(amplitudes).reshape(len(amplitudes), 1))
+    return _factor_array(np.array(amplitudes).reshape(len(amplitudes), 1))
 
 
 def _format_int_to_kets(binary_string, split, split_color):
@@ -518,40 +531,56 @@ def _get_factored_prefix(n_complex):
             return ''
 
 
-def get_bloch_angles(state_vector):
-    if state_vector.size > 2:
-        raise ValueError('Only works for single qubits')
+# def get_bloch_angles(state_vector):
+#     if state_vector.size > 2:
+#         raise ValueError('Only works for single qubits')
+#
+#     sv = state_vector.reshape(1, state_vector.shape[0])
+#     density_matrix = sv.T.conj() @ sv
+#
+#     w = round(density_matrix[0, 0] - density_matrix[1, 1], 12)
+#     # actually is theta/2
+#     theta = float(acos(w))
+#
+#     u = round(re(density_matrix[0, 1]) * 2, 12)
+#
+#     # can't divide by 0 in cases of 0,1 or 1,0
+#     if w < 1:
+#         phi = float(acos(u / sin(theta)))
+#     else:
+#         phi = 0
+#
+#     return theta, phi
 
-    sv = state_vector.reshape(1, state_vector.shape[0])
-    density_matrix = sv.T.conj() @ sv
+def show_bloch_angles(qc, label='\psi'):
+    rho = what_is_the_density_matrix(qc)
+    bit_size = int(log2(rho.shape[0]))
 
-    w = round(density_matrix[0, 0] - density_matrix[1, 1], 12)
-    # actually is theta/2
-    theta = float(acos(w))
+    latex_bloch_vector = ''
+    for current_bit in range(bit_size):
+        # (u, v, w) = (sin θ cos ϕ, sin θ sin ϕ, cos θ )
+        x_component = np.real(np.trace(Pauli.pauli_single(bit_size, current_bit, 'X').to_matrix() @ rho))
+        y_component = np.real(np.trace(Pauli.pauli_single(bit_size, current_bit, 'Y').to_matrix() @ rho))
+        z_component = np.real(np.trace(Pauli.pauli_single(bit_size, current_bit, 'Z').to_matrix() @ rho))
 
-    u = round(re(density_matrix[0, 1]) * 2, 12)
+        theta = acos(z_component)
+        if x_component == 0:
+            phi = 0
+        else:
+            phi = atan(y_component / x_component)
 
-    # can't divide by 0 in cases of 0,1 or 1,0
-    if w < 1:
-        phi = float(acos(u / sin(theta)))
-    else:
-        phi = 0
-
-    return theta, phi
+        latex_bloch_vector += format_bloch_vector(round(theta, 12), round(phi, 12), label + '_' + str(current_bit)) + llf
+    display(Latex(latex_bloch_vector))
 
 
-def show_bloch_vector(qc, label='\psi'):
-    state_vector = execute_state_vector(qc)
-
-    theta, phi = get_bloch_angles(state_vector)
-
+def format_bloch_vector(theta, phi, label='\psi'):
     l_theta = format_rotation_latex(theta)
     l_phi = format_rotation_latex(phi)
 
     str_bloch_vector = r'\begin{equation*} \vert ' + label + r'\rangle='
     str_bloch_vector += r'cos\left({}\right)'.format(l_theta)
     str_bloch_vector += r'\vert 0 \rangle +'
-    if phi > 0:
+    if not phi == 0:
         str_bloch_vector += r'e^{' + l_phi + r' i}'
 
     str_bloch_vector += r' sin\left({}\right)'.format(l_theta)
@@ -563,16 +592,24 @@ def show_bloch_vector(qc, label='\psi'):
 
 def show_state_vector(qc, show_zeros=False, integer=False, split=0,
                       split_color=None, factor_out=True, label='\psi', truncate=128,
-                      highlight=-1, display_exp=False):
+                      highlight=-1, display_exp=False, normalize=False):
     str_state_vector = r'\begin{equation*} \vert ' + label + r'\rangle='
     ket_format = format_state_vector(execute_state_vector(qc), show_zeros)
     is_first = True
     is_factored = False
+
     if factor_out:
         front_factor = _get_array_factor(ket_format)
         if front_factor > 0:
             is_factored = True
             str_state_vector += format_complex_as_latex(front_factor) + r'\big('
+
+    if normalize and not is_factored:
+        front_factor = ket_format[next(iter(ket_format))]
+        if not front_factor == 1:
+            is_factored = True
+            str_state_vector += format_complex_as_latex(front_factor) + r'\big('
+
     item_count = 0
     is_highlighted = False
     vector_length = len(ket_format)
@@ -602,7 +639,10 @@ def show_state_vector(qc, show_zeros=False, integer=False, split=0,
             else:
                 kets = r' \vert' + k + r'\rangle'
             if is_factored:
-                str_state_vector += _get_factored_prefix(v) + kets
+                if round(np.real(v / front_factor), 6) == 1:
+                    str_state_vector += kets
+                else:
+                    str_state_vector += format_complex_as_latex(v / front_factor, display_exp=display_exp) + kets
             else:
                 str_state_vector += format_complex_as_latex(v, display_exp=display_exp) + kets
             if is_highlighted:
@@ -620,7 +660,7 @@ def show_state_vector(qc, show_zeros=False, integer=False, split=0,
     if is_factored:
         str_state_vector += r'\big)'
     str_state_vector += r'\end{equation*}'
-    return str_state_vector
+    display(Latex(str_state_vector))
 
 
 def print_short_state_vector(qc):
