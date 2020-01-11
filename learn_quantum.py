@@ -84,12 +84,25 @@ def get_basis(char_bit):
     raise ValueError('Invalid character passed to get_basis')
 
 
-def reverse_results(results, integer=False, threshold=0):
+def initialize_register(circuit, register, value, reverse=True):
+    for k in range(len(register)):
+        if 2 ** k & value:
+            if reverse:
+                circuit.x(register[len(register) - k - 1])
+            else:
+                circuit.x(register[k])
+
+
+def format_results(results, integer=False, threshold=0, reverse=True, split=None):
     new_results = {}
     for k, v in results.items():
-        k = reverse_string(k)
+        if reverse:
+            k = reverse_string(k)
         if integer:
-            k = int(k, 2)
+            new = ''
+            for val in k.split(' '):
+                new += str(int(val, 2)) + '  '
+            k = new
         if v > threshold:
             new_results[k] = v
     return new_results.items()
@@ -149,7 +162,14 @@ def print_reverse_results(results, label=None, integer=False, threshold=0):
     lbl = 'Reversed:'
     if label is not None:
         lbl = lbl + label + ':'
-    print(lbl, sorted(reverse_results(results, integer, threshold)))
+    print(lbl, sorted(format_results(results, integer=integer, threshold=threshold, reverse=True)))
+
+
+def print_results(results, label=None, integer=False, reverse=False, threshold=0):
+    lbl = ''
+    if label is not None:
+        lbl = lbl + label + ':'
+    print(lbl, sorted(format_results(results, integer=integer, threshold=threshold, reverse=reverse)))
 
 
 def swap_rows(arr, row_1, row_2):
@@ -220,20 +240,22 @@ def what_is_the_matrix(qc):
     return swap_entries(qiskit_array)
 
 
-def show_me_the_matrix(qc, bracket_type=None, factor_out=True,
-                       normalize=False, label=None, display_exp=False):
+def show_me_the_matrix(qc, bracket_type=None, factor_out=True, max_display_size=16,
+                       normalize=False, label=None, display_exp=False, display_omega=False, omega_size=0):
     unitary = what_is_the_matrix(qc)
-
     # limit the size
     truncated_str = ''
-    if unitary.shape[0] > 16:
-        unitary = unitary[0:15, 0:15]
+    if omega_size == 0:
+        omega_size = unitary.shape[0]
+    if unitary.shape[0] > max_display_size:
+        unitary = unitary[0:max_display_size-1, 0:max_display_size-1]
         truncated_str = r'Max Display Size Exceeded'
     display(Latex(np_array_to_latex(unitary,
-                             bracket_type=get_bracket_type(bracket_type),
-                             factor_out=factor_out,
-                             normalize=normalize,
-                             label=label, display_exp=display_exp) + truncated_str ))
+                                    bracket_type=get_bracket_type(bracket_type),
+                                    factor_out=factor_out,
+                                    normalize=normalize,
+                                    label=label,
+                                    display_exp=display_exp, display_omega=display_omega, omega_size=omega_size) + truncated_str))
 
 
 def what_is_the_state_vector(qc):
@@ -257,7 +279,7 @@ def show_density_matrix(qc, bracket_type=None, factor_out=False, label=None):
     display(Latex(np_array_to_latex(density_matrix,
                                     bracket_type=get_bracket_type(bracket_type),
                                     factor_out=factor_out,
-                                    label=label) ))
+                                    label=label)))
 
 
 def get_bracket_type(bracket_type=None):
@@ -267,8 +289,8 @@ def get_bracket_type(bracket_type=None):
 
 
 def show_array(np_array, bracket_type=None, factor_out=True,
-                      normalize=False, label=None, begin_equation=True,
-                      display_exp=False, positive_exp=True):
+               normalize=False, label=None, begin_equation=True,
+               display_exp=False, positive_exp=True):
     display(Latex(np_array_to_latex(np_array, bracket_type=bracket_type, factor_out=factor_out,
                                     normalize=normalize, label=label, begin_equation=begin_equation,
                                     display_exp=display_exp, positive_exp=positive_exp)))
@@ -276,16 +298,27 @@ def show_array(np_array, bracket_type=None, factor_out=True,
 
 def np_array_to_latex(np_array, bracket_type=None, factor_out=True,
                       normalize=False, label=None, begin_equation=True,
-                      display_exp=False, positive_exp=True):
+                      display_exp=False, display_omega=False, omega_size=0, positive_exp=True):
     rows, cols = np_array.shape
     bracket_type = get_bracket_type(bracket_type)
+
+    # is omega_size is not passed in, compute it
+    # would be passed in for truncated array
+    if display_omega:
+        if omega_size == 0:
+            omega_size = np_array.shape[0]
+        normalize = True
 
     # Normalize forces the first term to be 1
     if normalize:
         factor = np_array[0][0]
         # only divide by real
-        factor = round(factor.real, 6)
-        factor_out = True
+        factor = round(factor.real, 10)
+        if factor == 0:
+            factor = 1
+            factor_out = False
+        else:
+            factor_out = True
     else:
         if factor_out:
             factor = _factor_array(np_array)
@@ -305,7 +338,8 @@ def np_array_to_latex(np_array, bracket_type=None, factor_out=True,
             if factor_out:
                 current = current / factor
             output += format_complex_as_latex(
-                current, display_exp=display_exp, positive_exp=positive_exp)
+                current, display_exp=display_exp, omega_size=omega_size,
+                positive_exp=positive_exp)
             if j < cols - 1:
                 output += ' & '
         output += r' \\ ' + '\n'
@@ -321,14 +355,14 @@ def _factor_array(np_array):
     rows, cols = np_array.shape
     for i in range(rows):
         for j in range(cols):
-            potential = abs(round(np_array[i, j].real, 6))
+            potential = abs(round(np_array[i, j].real, 10))
             if potential != 0 and factor != 0 and potential != factor:
                 return 0
             else:
                 if factor == 0 and potential != 0:
                     factor = potential
 
-            potential = abs(round(np_array[i, j].imag, 6))
+            potential = abs(round(np_array[i, j].imag, 10))
             if potential != 0 and factor != 0 and potential != factor:
                 return 0
             else:
@@ -357,7 +391,35 @@ def format_complex_as_exponent(complex_to_format, positive_exp=True):
     return r'e^{' + format_rotation_latex(float(im(exponent)), positive_only=positive_exp) + ' i}'
 
 
-def format_complex_as_latex(complex_to_format, display_exp=False, positive_exp=True):
+def format_complex_as_omega(complex_to_format, omega_size):
+    # if it is just 1, don't format
+    if round(complex_to_format.real, 8) == 1:
+        return format_complex_as_latex(complex_to_format, display_exp=False)
+
+    exponent = sympy_log(complex_to_format)
+    # if not pure imaginary, don't format
+    if not round(float(re(exponent)), 8) == 0:
+        return format_complex_as_latex(complex_to_format, display_exp=False)
+
+    rotation_in_radians = float(im(exponent))
+
+    fraction = get_rotation_fraction(rotation_in_radians, positive_only=True)
+
+    if np.isclose(np.cos(fraction * pi), np.cos(rotation_in_radians)):
+        omega_val = ((omega_size // fraction.denominator) * fraction.numerator ) // 2
+        return r'\omega^{'+str(omega_val) + r'}'
+
+
+    return format_complex_as_latex(complex_to_format, omega_size=0)
+
+
+
+
+
+def format_complex_as_latex(complex_to_format, display_exp=False, positive_exp=True, omega_size=0):
+    if omega_size > 0:
+        return format_complex_as_omega(complex_to_format, omega_size)
+
     if display_exp:
         return format_complex_as_exponent(complex_to_format, positive_exp=positive_exp)
 
@@ -506,16 +568,26 @@ def _get_array_factor(ket_format_array):
     return _factor_array(np.array(amplitudes).reshape(len(amplitudes), 1))
 
 
-def _format_int_to_kets(binary_string, split, split_color):
-    if split == 0:
-        kets = r' \vert' + r'\textbf{' + str(int(binary_string, 2)) + '}' + r'\rangle'
-    else:
-        # for now, just do a 2 split
-        count = len(binary_string)
-        kets = r' \vert' + r'\textbf{' + str(int(binary_string[0:split], 2)) + '}' + r'\rangle'
+def _format_kets(binary_string, split_array, split_color, integer):
+    if len(split_array) <= 1:
+        if integer:
+            val = str(int(binary_string, 2))
+        else:
+            val = binary_string
+        return r' \vert' + r'\textbf{' + val + '}' + r'\rangle'
+
+    kets = ''
+    start_at = 0
+    for k in range(len(split_array)):
         if split_color is not None:
-            kets += r'\color{' + split_color + r'}{'
-        kets += r' \vert' + r'\textbf{' + str(int(binary_string[split:count], 2)) + '}' + r'\rangle'
+            kets += r'\color{' + str(split_color[k]) + r'}{'
+        if integer:
+            val = str(int(binary_string[start_at:split_array[k]], 2))
+        else:
+            val = binary_string[start_at:split_array[k]]
+        kets += r' \vert' + r'\textbf{' + val + '}' + r'\rangle'
+        start_at = split_array[k]
+
         if split_color is not None:
             kets += r'}'
     return kets
@@ -530,27 +602,6 @@ def _get_factored_prefix(n_complex):
         else:
             return ''
 
-
-# def get_bloch_angles(state_vector):
-#     if state_vector.size > 2:
-#         raise ValueError('Only works for single qubits')
-#
-#     sv = state_vector.reshape(1, state_vector.shape[0])
-#     density_matrix = sv.T.conj() @ sv
-#
-#     w = round(density_matrix[0, 0] - density_matrix[1, 1], 12)
-#     # actually is theta/2
-#     theta = float(acos(w))
-#
-#     u = round(re(density_matrix[0, 1]) * 2, 12)
-#
-#     # can't divide by 0 in cases of 0,1 or 1,0
-#     if w < 1:
-#         phi = float(acos(u / sin(theta)))
-#     else:
-#         phi = 0
-#
-#     return theta, phi
 
 def show_bloch_angles(qc, label='\psi'):
     rho = what_is_the_density_matrix(qc)
@@ -569,7 +620,8 @@ def show_bloch_angles(qc, label='\psi'):
         else:
             phi = atan(y_component / x_component)
 
-        latex_bloch_vector += format_bloch_vector(round(theta, 12), round(phi, 12), label + '_' + str(current_bit)) + llf
+        latex_bloch_vector += format_bloch_vector(round(theta, 12), round(phi, 12),
+                                                  label + '_' + str(current_bit)) + llf
     display(Latex(latex_bloch_vector))
 
 
@@ -590,7 +642,7 @@ def format_bloch_vector(theta, phi, label='\psi'):
     return str_bloch_vector
 
 
-def show_state_vector(qc, show_zeros=False, integer=False, split=0,
+def show_state_vector(qc, show_zeros=False, integer=False, split=0, split_registers=False,
                       split_color=None, factor_out=True, label='\psi', truncate=128,
                       highlight=-1, display_exp=False, normalize=False):
     str_state_vector = r'\begin{equation*} \vert ' + label + r'\rangle='
@@ -634,10 +686,9 @@ def show_state_vector(qc, show_zeros=False, integer=False, split=0,
                     if v.real == 0 and v.imag >= 0:
                         str_state_vector += '+'
             is_first = False
-            if integer:
-                kets = _format_int_to_kets(k, split, split_color)
-            else:
-                kets = r' \vert' + k + r'\rangle'
+
+            kets = _format_kets(k, split_array=get_split_array(qc, split, k, split_registers), split_color=split_color, integer=integer)
+
             if is_factored:
                 if round(np.real(v / front_factor), 6) == 1:
                     str_state_vector += kets
@@ -661,6 +712,21 @@ def show_state_vector(qc, show_zeros=False, integer=False, split=0,
         str_state_vector += r'\big)'
     str_state_vector += r'\end{equation*}'
     display(Latex(str_state_vector))
+
+
+def get_split_array(circuit, split_value, full_string, split_registers):
+    if split_value > 0:
+        return [split_value, len(full_string)]
+    if not split_registers:
+        return [0]
+
+    ar = []
+    current_end = 0
+    for k in range(len(circuit.qregs)):
+        reg_len = len(circuit.qregs[k])
+        current_end += reg_len
+        ar.append(current_end)
+    return ar
 
 
 def print_short_state_vector(qc):
