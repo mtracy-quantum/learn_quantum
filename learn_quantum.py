@@ -308,6 +308,8 @@ def np_array_to_latex(np_array, bracket_type=None, factor_out=True,
         if omega_size == 0:
             omega_size = np_array.shape[0]
         normalize = True
+    else:
+        omega_size = 0
 
     # Normalize forces the first term to be 1
     if normalize:
