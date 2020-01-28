@@ -93,6 +93,27 @@ def initialize_register(circuit, register, value, reverse=True):
                 circuit.x(register[k])
 
 
+def results_by_qubit(answers, reverse=True):
+    bit_size = len(next(iter(answers)))
+    zeros = [0] * bit_size
+    ones = [0] * bit_size
+
+    for val in answers:
+        n = 0
+        if reverse:
+            loop_string = reverse_string(val)
+        else:
+            loop_string = val
+        for bit in loop_string:
+            if bit == '0':
+                zeros[n] += answers[val]
+            elif bit == '1':
+                ones[n] += answers[val]
+            ## it could be a space for split registers, leave as 0
+            n += 1
+    return zeros, ones
+
+
 def format_results(results, integer=False, threshold=0, reverse=True, split=None):
     new_results = {}
     for k, v in results.items():
@@ -214,21 +235,27 @@ def print_matrix(qc):
         print(what_is_the_matrix(qc))
 
 
-def show_eigens(qc, bracket_type=None):
+def show_eigens(qc, bracket_type=None, display_exp=False, display_omega=False, omega_size=0):
     if isinstance(qc, QuantumCircuit):
         unitary = what_is_the_matrix(qc)
     else:
         unitary = qc
     w, v = np.linalg.eig(unitary)
 
+    if omega_size == 0:
+        omega_size = v[0].shape[0]
+
     bracket_type = get_bracket_type(bracket_type)
     output = r'\begin{equation*}'
     for n in range(w.shape[0]):
-        output += r'\lambda_' + str(n) + '=' + format_complex_as_latex(w[n])
+        output += r'\lambda_{' + str(n) + r'}=' + format_complex_as_latex(w[n])
+        if display_omega:
+            output += r'=' + format_complex_as_omega(w[n], omega_size=omega_size)
         output += r',\; '
         output += np_array_to_latex(v[:, n].reshape(v[:, n].shape[0], 1),
                                     bracket_type=bracket_type, factor_out=True, begin_equation=False,
-                                    label='v_' + str(n))
+                                    display_exp=display_exp, display_omega=display_omega, omega_size=omega_size,
+                                    label='v_{' + str(n) +'}')
         output += r'\quad'
     output += r'\end{equation*}'
 
@@ -411,11 +438,7 @@ def format_complex_as_omega(complex_to_format, omega_size):
         omega_val = ((omega_size // fraction.denominator) * fraction.numerator ) // 2
         return r'\omega^{'+str(omega_val) + r'}'
 
-
     return format_complex_as_latex(complex_to_format, omega_size=0)
-
-
-
 
 
 def format_complex_as_latex(complex_to_format, display_exp=False, positive_exp=True, omega_size=0):
@@ -558,7 +581,6 @@ def print_state_array(state_vector, show_zeros=False, integer=False, split=0):
             else:
                 count = len(k)
                 print('{}|{}>|{}>'.format(v, str(int(k[0:split], 2)), str(int(k[split:count], 2))))
-
         else:
             print(v, '|', k)
 
