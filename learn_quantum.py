@@ -291,9 +291,8 @@ def what_is_the_state_vector(qc):
 
 
 def what_is_the_density_matrix(qc):
-    state_vector = execute_state_vector(qc)
-    sv = state_vector.reshape(1, state_vector.shape[0])
-    return sv.T.conj() @ sv
+    state_vector = what_is_the_state_vector(qc)
+    return state_vector @ state_vector.T.conj()
 
 
 def show_density_matrix(qc, bracket_type=None, factor_out=False, label=None):
@@ -307,6 +306,49 @@ def show_density_matrix(qc, bracket_type=None, factor_out=False, label=None):
                                     bracket_type=get_bracket_type(bracket_type),
                                     factor_out=factor_out,
                                     label=label)))
+
+
+def permutation_integers(mat):
+    ret = []
+    for r in range(mat.shape[0]):
+        for c in range(mat.shape[1]):
+            if round(mat[c][r].real,4) == 1:
+                ret.append(c)
+                break
+    return ret
+
+
+def show_cycles(qc, min_size=1, max_size=100):
+    if isinstance(qc, QuantumCircuit):
+        unitary = what_is_the_matrix(qc)
+    else:
+        unitary = qc
+    cycles = []
+    priors = []
+    perm = permutation_integers(unitary)
+    for k in range(len(perm)):
+        step = k
+        new_cycle = [k]
+        while not perm[step] == k:
+            step = perm[step]
+            if step in priors:
+                break
+            new_cycle.append(step)
+            priors.append(step)
+        if len(new_cycle) > 0:
+            cycles.append(new_cycle)
+    latex = r'\begin{equation*}'
+
+    for cycle in cycles:
+        cycle_len = len(cycle)
+        if cycle_len >= min_size and cycle_len <= max_size:
+            for step in range(len(cycle)):
+                latex += str(cycle[step])
+                if step < len(cycle) - 1:
+                    latex += ' \mapsto '
+            latex += r'\;\;\;({})'.format(cycle_len) + r'\\'
+    latex += r'\end{equation*}'
+    display(Latex(latex))
 
 
 def get_bracket_type(bracket_type=None):
@@ -627,26 +669,49 @@ def _get_factored_prefix(n_complex):
             return ''
 
 
-def show_bloch_angles(qc, label='\psi'):
+def get_bloch_vectors(qc):
     rho = what_is_the_density_matrix(qc)
     bit_size = int(log2(rho.shape[0]))
 
-    latex_bloch_vector = ''
+    bloch_array = []
     for current_bit in range(bit_size):
-        # (u, v, w) = (sin θ cos ϕ, sin θ sin ϕ, cos θ )
         x_component = np.real(np.trace(Pauli.pauli_single(bit_size, current_bit, 'X').to_matrix() @ rho))
         y_component = np.real(np.trace(Pauli.pauli_single(bit_size, current_bit, 'Y').to_matrix() @ rho))
         z_component = np.real(np.trace(Pauli.pauli_single(bit_size, current_bit, 'Z').to_matrix() @ rho))
+        bloch_array.append([x_component, y_component, z_component])
+    return bloch_array
 
+
+def get_bloch_angles(qc):
+    bloch_array = get_bloch_vectors(qc)
+    bloch_angles = []
+    # (u, v, w) = (sin θ cos ϕ, sin θ sin ϕ, cos θ )
+    for bloch_vector in bloch_array:
+        x_component, y_component, z_component = bloch_vector
         theta = acos(z_component)
         if x_component == 0:
             phi = 0
         else:
             phi = atan(y_component / x_component)
+        bloch_angles.append([theta/2, phi])
+    return bloch_angles
+
+
+def show_bloch_angles(qc, label='\psi'):
+    bloch_array = get_bloch_angles(qc)
+
+    latex_bloch_vector = ''
+    current_bit = 0
+    for bloch_angles in bloch_array:
+        theta = bloch_angles[0]
+        phi = bloch_angles[1]
 
         latex_bloch_vector += format_bloch_vector(round(theta, 12), round(phi, 12),
                                                   label + '_' + str(current_bit)) + llf
+        current_bit += 1
+
     display(Latex(latex_bloch_vector))
+
 
 
 def format_bloch_vector(theta, phi, label='\psi'):
