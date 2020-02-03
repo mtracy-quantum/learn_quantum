@@ -312,7 +312,7 @@ def permutation_integers(mat):
     ret = []
     for r in range(mat.shape[0]):
         for c in range(mat.shape[1]):
-            if round(mat[c][r].real,4) == 1:
+            if round(mat[c][r].real, 4) == 1:
                 ret.append(c)
                 break
     return ret
