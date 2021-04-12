@@ -1,4 +1,4 @@
-from math import pi, sqrt, log, log2
+from math import pi, sqrt, log, log2, floor
 import fractions as frac
 from cmath import phase
 
@@ -13,7 +13,8 @@ from itertools import groupby
 from itertools import product as iter_product
 import qiskit.quantum_info.synthesis.two_qubit_decompose as twoq
 import matplotlib.pyplot as plt
-from sympy import log as sympy_log, re, im, acos, atan, sin, cos
+from sympy import log as sympy_log, re, im, acos, atan, sin, cos, factorint, \
+    primefactors, gcd, mod_inverse, prime
 
 from IPython.display import Latex, display
 
@@ -85,6 +86,15 @@ def get_basis(char_bit):
 
 
 def initialize_register(circuit, register, value, reverse=True):
+    """
+    Classical binary initialization
+    e.g. value=3 sets '00011' depending on size of register
+    :param circuit: the circuit you wish to initialize
+    :param register: register in the circuit
+    :param value: integer value to set the binary values
+    :param reverse: reverse the qiskit format
+    :return: none
+    """
     for k in range(len(register)):
         if 2 ** k & value:
             if reverse:
@@ -94,6 +104,13 @@ def initialize_register(circuit, register, value, reverse=True):
 
 
 def results_by_qubit(answers, reverse=True):
+    """
+    Breaks the result set down by qubit and returns how many times each qubit
+    had a result of 0 and 1.
+    :param answers: The result set to break down
+    :param reverse: Whether to reverse Qiskit format
+    :return:  lists of qubit values of zeros and ones
+    """
     bit_size = len(next(iter(answers)))
     zeros = [0] * bit_size
     ones = [0] * bit_size
@@ -114,7 +131,35 @@ def results_by_qubit(answers, reverse=True):
     return zeros, ones
 
 
+def combine_results(a_base, a_new):
+    """
+    Takes two results and adds the values for like keys together
+
+    :param a_base: A results set ( the one you are adding to)
+    :param a_new: A result set (typically the one you just ran and are adding to the total)
+    :return:  the a_base value with the a_new values added to it
+    """
+    for key, value in a_new.items():
+        if key in a_base:
+            a_base[key] += value
+        else:
+            a_base[key] = value
+    return a_base
+
+
 def format_results(results, integer=False, threshold=0, reverse=True, split=None):
+    """
+    Formats results by register, converts to integers, and/or reverses bits
+    So 000010 01: 200  can be formated as 2 1: 200.
+
+    :param results: The results to split
+    :param integer: Format results as integer
+    :param threshold: Drop results with fewer than theshold values (not percentage).
+    :param reverse: Reverse from Qiskit standard
+    :param split:
+    :return:
+    """
+
     new_results = {}
     for k, v in results.items():
         if reverse:
@@ -145,6 +190,13 @@ def get_axis(axis, qr, cr):
 
 
 def get_measure(axis, qr, cr):
+    """
+    For X, Y, Z axes, construct a QuantumCircuit that measures a single QuantumRegister
+    :param axis: Axes to be measured, can be multiple.  e.g. 'X' , 'XYZ' -- one for each qubit
+    :param qr: QuantumRegister to measure
+    :param cr: ClassicalRegister to measure into
+    :return: QuantumCircuit consisting of measurement
+    """
     m = get_axis(axis, qr, cr)
     m.measure(qr, cr)
     return m
@@ -235,6 +287,78 @@ def print_matrix(qc):
         print(what_is_the_matrix(qc))
 
 
+def print_eigen_periods(qc):
+    if isinstance(qc, QuantumCircuit):
+        unitary = what_is_the_matrix(qc)
+    else:
+        unitary = qc
+    w, v = np.linalg.eig(unitary)
+
+    periods = []
+
+    for val in w:
+        rounded = complex(round(val.real, 8), round(val.imag, 8))
+        exponent = sympy_log(rounded)
+        fraction = get_rotation_fraction(float(im(exponent)), positive_only=True)
+
+        period = 2*fraction.denominator
+
+        if not round(float(re(exponent)), 4) == 0:
+            print(val)
+        else:
+            if period not in periods:
+                periods.append(period)
+    print(','.join([str(p) for p in sorted(periods)]))
+    return periods
+
+
+def show_eigen_values(qc, display_distinct=False, display_exp=False, display_omega=False, omega_size=0):
+    if isinstance(qc, QuantumCircuit):
+        unitary = what_is_the_matrix(qc)
+    else:
+        unitary = qc
+    w, v = np.linalg.eig(unitary)
+
+    if omega_size == 0:
+        omega_size = v[0].shape[0]
+
+    display_vals = w
+
+    if display_distinct:
+        distinct_vals = []
+        for val in w:
+            rounded = complex(round(val.real, 8), round(val.imag, 8))
+            if not rounded in distinct_vals:
+                distinct_vals.append(rounded)
+        display_vals = distinct_vals
+
+    output = r'\begin{equation*}'
+    for n in range(len(display_vals)):
+        if display_distinct:
+            index_vals = []
+            for i, val in enumerate(w):
+                rounded = complex(round(val.real, 8), round(val.imag, 8))
+                if rounded == display_vals[n]:
+                    index_vals.append(i)
+            index_string = ','.join([str(y) for y in index_vals])
+        else:
+            index_string = str(n)
+
+        if display_exp:
+            output += r'\lambda_{' + index_string + r'}=' + format_complex_as_exponent(display_vals[n])
+        else:
+            output += r'\lambda_{' + index_string + r'}=' + format_complex_as_latex(display_vals[n])
+        if display_omega:
+            output += r'=' + format_complex_as_omega(w[n], omega_size=omega_size)
+
+        output += r',\; '
+
+        output += r'\quad'
+    output += r'\end{equation*}'
+
+    display(Latex(output))
+
+
 def show_eigens(qc, bracket_type=None, display_exp=False, display_omega=False, omega_size=0):
     if isinstance(qc, QuantumCircuit):
         unitary = what_is_the_matrix(qc)
@@ -248,7 +372,10 @@ def show_eigens(qc, bracket_type=None, display_exp=False, display_omega=False, o
     bracket_type = get_bracket_type(bracket_type)
     output = r'\begin{equation*}'
     for n in range(w.shape[0]):
-        output += r'\lambda_{' + str(n) + r'}=' + format_complex_as_latex(w[n])
+        if display_exp:
+            output += r'\lambda_{' + str(n) + r'}=' + format_complex_as_exponent(w[n])
+        else:
+            output += r'\lambda_{' + str(n) + r'}=' + format_complex_as_latex(w[n])
         if display_omega:
             output += r'=' + format_complex_as_omega(w[n], omega_size=omega_size)
         output += r',\; '
@@ -269,7 +396,11 @@ def what_is_the_matrix(qc):
 
 def show_me_the_matrix(qc, bracket_type=None, factor_out=True, max_display_size=16,
                        normalize=False, label=None, display_exp=False, display_omega=False, omega_size=0):
-    unitary = what_is_the_matrix(qc)
+    if isinstance(qc, QuantumCircuit):
+        unitary = what_is_the_matrix(qc)
+    else:
+        unitary = qc
+
     # limit the size
     truncated_str = ''
     if omega_size == 0:
@@ -309,9 +440,16 @@ def show_density_matrix(qc, bracket_type=None, factor_out=False, label=None):
 
 
 def permutation_integers(mat):
+    """
+    Return list of integers representing one-hot rows from a permutation matrix
+    :param mat: Permutation matrix (no checking)
+    :return: list of integers
+    """
     ret = []
     for r in range(mat.shape[0]):
         for c in range(mat.shape[1]):
+            # When multipled by a one-hot ket,
+            # the column is returned corresponding to the one-hot row
             if round(mat[c][r].real, 4) == 1:
                 ret.append(c)
                 break
@@ -319,6 +457,14 @@ def permutation_integers(mat):
 
 
 def show_cycles(qc, min_size=1, max_size=100):
+    """
+    Display latex of the permutation cycles of a QuantumCircuit that makes a permutation matrix
+    Displays nothing if it is not a permutation matrix
+    :param qc: QuantumCircuit or unitary matrix (not verified)
+    :param min_size: does not display cycles less than min_size
+    :param max_size: truncates cycles > max_size with ...
+    :return: Display Latex - no return value
+    """
     if isinstance(qc, QuantumCircuit):
         unitary = what_is_the_matrix(qc)
     else:
@@ -326,27 +472,43 @@ def show_cycles(qc, min_size=1, max_size=100):
     cycles = []
     priors = []
     perm = permutation_integers(unitary)
+
     for k in range(len(perm)):
         step = k
         new_cycle = [k]
-        while not perm[step] == k:
-            step = perm[step]
-            if step in priors:
-                break
-            new_cycle.append(step)
-            priors.append(step)
-        if len(new_cycle) > 0:
+
+        # Handle one step cycles
+        if perm[step] == k:
             cycles.append(new_cycle)
+            priors.append(step)
+        elif k not in priors:  # skip values already in a cycle
+            # loop through until a repeat is found
+            while not perm[step] == k:
+                step = perm[step]
+                if step in priors:
+                    break
+                new_cycle.append(step)
+                priors.append(step)
+            if len(new_cycle) > 1:
+                cycles.append(new_cycle)
+
     latex = r'\begin{equation*}'
 
     for cycle in cycles:
         cycle_len = len(cycle)
-        if cycle_len >= min_size and cycle_len <= max_size:
+        if cycle_len >= min_size:
             for step in range(len(cycle)):
-                latex += str(cycle[step])
-                if step < len(cycle) - 1:
-                    latex += ' \mapsto '
+                if step < max_size//2 or step > (cycle_len - max_size//2):
+                    latex += str(cycle[step])
+                    if step < len(cycle) - 1:
+                        latex += ' \mapsto '
+                elif step == max_size//2:
+                        latex += r' \ldots \ldots '
+
             latex += r'\;\;\;({})'.format(cycle_len) + r'\\'
+            # add extra linefeed -- easier to read
+            latex += r'\end{equation*}' + '\r\n' + r'\begin{equation*}'
+
     latex += r'\end{equation*}'
     display(Latex(latex))
 
@@ -597,34 +759,41 @@ def int_to_binary_string(number, size, reverse=False):
     return binary_string
 
 
-def format_state_vector(state_vector, show_zeros=False):
+def format_state_vector(state_vector, show_zeros=False, reverse=True):
     binary_vector = {}
 
     bits = int(log(len(state_vector), 2))
     for n in range(len(state_vector)):
-        if show_zeros or state_vector[n] != 0:
-            ket_string = int_to_binary_string(n, bits, reverse=True)
-            binary_vector[ket_string] = state_vector[n]
+        if show_zeros or round(state_vector[n].real, 4) != 0 or round(state_vector[n].imag, 4) != 0:
+            ket_string = int_to_binary_string(n, bits, reverse=reverse)
+            binary_vector[ket_string] = np.round(state_vector[n], 8)
     return binary_vector
 
 
-def print_state_vector(qc, show_zeros=False, integer=False, split=0):
+def print_state_vector(qc, show_zeros=False, integer=False, show_prob=False, reverse=True, split=0):
     state_vector = execute_state_vector(qc)
-    print_state_array(state_vector, show_zeros=show_zeros, integer=integer, split=split)
+    print_state_array(state_vector, show_zeros=show_zeros, show_prob=show_prob,
+                      integer=integer, reverse=reverse, split=split)
 
 
-def print_state_array(state_vector, show_zeros=False, integer=False, split=0):
-    ket_format = format_state_vector(state_vector, show_zeros)
+def print_state_array(state_vector, show_zeros=False, integer=False,
+                      show_prob=False, reverse=True, split=0):
+    ket_format = format_state_vector(state_vector, show_zeros=show_zeros, reverse=reverse)
 
     for k, v in sorted(ket_format.items()):
+        if not show_zeros and round(v.real, 8) == 0 and round(v.imag, 8) == 0:
+            continue
+        prob = ''
+        if show_prob:
+            prob = '(p={})'.format( np.round((v*np.conj(v)).real, 4))
         if integer:
             if split == 0:
-                print('{}|{}>'.format(v, str(int(k, 2))))
+                print('{} {}|{}>'.format(prob, v, str(int(k, 2))))
             else:
                 count = len(k)
-                print('{}|{}>|{}>'.format(v, str(int(k[0:split], 2)), str(int(k[split:count], 2))))
+                print('{} {}|{}>|{}>'.format(prob, v, str(int(k[0:split], 2)), str(int(k[split:count], 2))))
         else:
-            print(v, '|', k)
+            print(prob, v, '|', k)
 
 
 def _get_array_factor(ket_format_array):
@@ -640,7 +809,7 @@ def _format_kets(binary_string, split_array, split_color, integer):
             val = str(int(binary_string, 2))
         else:
             val = binary_string
-        return r' \vert' + r'\textbf{' + val + '}' + r'\rangle'
+        return r' \vert' + r'\textbf{' + val + '}' + r'\rangle '
 
     kets = ''
     start_at = 0
@@ -651,7 +820,7 @@ def _format_kets(binary_string, split_array, split_color, integer):
             val = str(int(binary_string[start_at:split_array[k]], 2))
         else:
             val = binary_string[start_at:split_array[k]]
-        kets += r' \vert' + r'\textbf{' + val + '}' + r'\rangle'
+        kets += r' \vert' + r'\textbf{' + val + '}' + r'\rangle '
         start_at = split_array[k]
 
         if split_color is not None:
@@ -670,7 +839,11 @@ def _get_factored_prefix(n_complex):
 
 
 def get_bloch_vectors(qc):
-    rho = what_is_the_density_matrix(qc)
+    if isinstance(qc, QuantumCircuit):
+        rho = what_is_the_density_matrix(qc)
+    else:
+        rho = qc
+
     bit_size = int(log2(rho.shape[0]))
 
     bloch_array = []
@@ -683,21 +856,33 @@ def get_bloch_vectors(qc):
 
 
 def get_bloch_angles(qc):
-    bloch_array = get_bloch_vectors(qc)
+    if isinstance(qc, QuantumCircuit):
+        bloch_array = get_bloch_vectors(qc)
+    else:
+        bloch_array = qc
+
     bloch_angles = []
-    # (u, v, w) = (sin θ cos ϕ, sin θ sin ϕ, cos θ )
+
     for bloch_vector in bloch_array:
         x_component, y_component, z_component = bloch_vector
-        theta = acos(z_component)
+        x_component = round(x_component, 14)
+        y_component = round(y_component, 14)
+        z_component = round(z_component, 14)
+
+        r = sqrt(x_component**2 + y_component**2 + z_component**2)
+
+        phi = acos(z_component/r)
+
         if x_component == 0:
-            phi = 0
+            theta = 0
         else:
-            phi = atan(y_component / x_component)
-        bloch_angles.append([theta/2, phi])
+            theta = atan(y_component / x_component)
+
+        bloch_angles.append([r, theta, phi])
     return bloch_angles
 
 
-def show_bloch_angles(qc, label='\psi'):
+def show_bloch_angles(qc, label='\psi', global_phase=True):
     bloch_array = get_bloch_angles(qc)
 
     latex_bloch_vector = ''
@@ -707,26 +892,42 @@ def show_bloch_angles(qc, label='\psi'):
         phi = bloch_angles[1]
 
         latex_bloch_vector += format_bloch_vector(round(theta, 12), round(phi, 12),
-                                                  label + '_' + str(current_bit)) + llf
+                                                  label + '_' + str(current_bit), global_phase=global_phase) + llf
+
         current_bit += 1
 
     display(Latex(latex_bloch_vector))
 
 
 
-def format_bloch_vector(theta, phi, label='\psi'):
-    l_theta = format_rotation_latex(theta)
-    l_phi = format_rotation_latex(phi)
+def format_bloch_vector(theta, phi, label='\psi', global_phase=True):
+    l_theta = format_rotation_latex(theta/2)
+    if global_phase:
+        l_phi = format_rotation_latex(phi)
 
-    str_bloch_vector = r'\begin{equation*} \vert ' + label + r'\rangle='
-    str_bloch_vector += r'cos\left({}\right)'.format(l_theta)
-    str_bloch_vector += r'\vert 0 \rangle +'
-    if not phi == 0:
-        str_bloch_vector += r'e^{' + l_phi + r' i}'
+        str_bloch_vector = r'\begin{equation*} \vert ' + label + r'\rangle='
+        str_bloch_vector += r'cos\left({}\right)'.format(l_theta)
+        str_bloch_vector += r'\vert 0 \rangle +'
+        if not phi == 0:
+            str_bloch_vector += r'e^{' + l_phi + r' i}'
 
-    str_bloch_vector += r' sin\left({}\right)'.format(l_theta)
-    str_bloch_vector += r'\vert 1 \rangle'
-    str_bloch_vector += r'\end{equation*}'
+        str_bloch_vector += r' sin\left({}\right)'.format(l_theta)
+        str_bloch_vector += r'\vert 1 \rangle'
+        str_bloch_vector += r'\end{equation*}'
+    else:
+        l_phi = format_rotation_latex(phi/2)
+
+        str_bloch_vector = r'\begin{equation*} \vert ' + label + r'\rangle='
+        if not phi == 0:
+            str_bloch_vector += r'e^{-' + l_phi + r' i}'
+        str_bloch_vector += r'cos\left({}\right)'.format(l_theta)
+        str_bloch_vector += r'\vert 0 \rangle +'
+        if not phi == 0:
+            str_bloch_vector += r'e^{' + l_phi + r' i}'
+
+        str_bloch_vector += r' sin\left({}\right)'.format(l_theta)
+        str_bloch_vector += r'\vert 1 \rangle'
+        str_bloch_vector += r'\end{equation*}'
 
     return str_bloch_vector
 
@@ -761,6 +962,10 @@ def show_state_vector(qc, show_zeros=False, integer=False, split=0, split_regist
     else:
         truncate_start = vector_length + 1
         truncate_stop = truncate_start + 1
+
+    # use first value to get size
+    split_array = get_split_array(qc, split, split_registers)
+
     for k, v in sorted(ket_format.items()):
         item_count += 1
         if item_count < truncate_start or item_count > truncate_stop:
@@ -769,14 +974,17 @@ def show_state_vector(qc, show_zeros=False, integer=False, split=0, split_regist
                 str_state_vector += r'\color{red}{'
                 is_highlighted = True
             if not is_first:
-                if v.real > 0:
+                if round(v.real, 8) > 0:
                     str_state_vector += '+'
-                else:
-                    if v.real == 0 and v.imag >= 0:
-                        str_state_vector += '+'
+                elif round(v.real, 8) == 0 and round(v.imag, 8) >= 0:
+                    str_state_vector += '+'
+                elif round(v.real, 8) == 0 and round(v.imag, 8) == 0:
+                    # for when show_zeros
+                    str_state_vector += '+'
+
             is_first = False
 
-            kets = _format_kets(k, split_array=get_split_array(qc, split, k, split_registers), split_color=split_color, integer=integer)
+            kets = _format_kets(k, split_array=split_array, split_color=split_color, integer=integer)
 
             if is_factored:
                 if round(np.real(v / front_factor), 6) == 1:
@@ -803,9 +1011,13 @@ def show_state_vector(qc, show_zeros=False, integer=False, split=0, split_regist
     display(Latex(str_state_vector))
 
 
-def get_split_array(circuit, split_value, full_string, split_registers):
+def get_split_array(circuit, split_value, split_registers):
+    full_size = 0
+    for k in range(len(circuit.qregs)):
+        full_size += len(circuit.qregs[k])
+
     if split_value > 0:
-        return [split_value, len(full_string)]
+        return [split_value, full_size]
     if not split_registers:
         return [0]
 
@@ -995,7 +1207,7 @@ def get_rotation_fraction(rotation_in_radians, positive_only=False):
     if positive_only and rotation_in_radians < 0:
         rotation_in_radians = 2 * np.pi + rotation_in_radians
 
-    return frac.Fraction(rotation_in_radians / np.pi).limit_denominator(256)
+    return frac.Fraction(rotation_in_radians / np.pi).limit_denominator(512)
 
 
 def format_rotation(rotation_in_radians, positive_only=False):
@@ -1100,46 +1312,51 @@ def latex_continued_fraction(numerator, denominator, shrink_at=99):
     return '$' + output + '$'
 
 
-def format_plot_data(answers, tick_threshold=0, spacing=8, reverse=True, integer=True):
+def format_plot_data(answers, tick_threshold=0, spacing=8, reverse=True, integer=True, bin_size=1):
     first_key = next(iter(answers))
     bit_size = len(first_key)
 
-    if integer:
-        x_axis_data = np.arange(0, 2 ** bit_size)
-    else:
-        x_list = np.arange(0, 2 ** bit_size)
-        binary_formater = lambda t: int_to_binary_string(t, bit_size, reverse=reverse)
-        x_axis_data = np.array([binary_formater(x_i) for x_i in x_list])
+    # load data
+    #x_axis_data = np.arange(0, 2 ** bit_size)
+    y_axis_data = [0]* (2 ** bit_size)
 
-    y_axis_data = np.zeros(2 ** bit_size)
+    for k, v in answers.items():
+        key_value = int(k, 2)
+        y_axis_data[key_value] = v
+
     # put a tick mark in the center no matter what
-    tick_marks = [x_axis_data[(2 ** bit_size // 2)]]
+    tick_marks = [(2 ** bit_size // 2)]
 
     # put first tick mark on first one with data
     last_tick_mark = -spacing - 1
-    count = 0
-    for x in x_axis_data:
-        if integer:
-            key = int_to_binary_string(x, bit_size, reverse=reverse)
-        else:
-            key = x
 
-        if key in answers:
-            y_axis_data[x] = answers[key]
-            if answers[key] > tick_threshold:
-                if count - last_tick_mark > spacing:
-                    tick_marks = np.append(tick_marks, x)
-                    last_tick_mark = count
-        count += 1
-    return x_axis_data, y_axis_data, tick_marks
+    # tick on top 10
+    sorted_values = np.sort(y_axis_data)[-10::]
+    for k in range(len(y_axis_data)):
+        if y_axis_data[k] >= sorted_values[0] and (k - last_tick_mark) > tick_threshold:
+            tick_marks = np.append(tick_marks, k)
+            last_tick_mark = k
+
+    # apply bins
+    x = []
+    y = []
+
+    for k in range(0, len(y_axis_data), bin_size):
+        # use the lowest edge of the bin
+        bin_total = np.sum(y_axis_data[k:k + bin_size])
+        if bin_total > -1:
+            x.append(k)
+            y.append(np.sum(y_axis_data[k:k + bin_size]))
+
+    return x, y, tick_marks
 
 
 def plot_results(answers, tick_threshold=0, fig_size=(10, 5),
-                 reverse=True, integer=True, fontsize=14, spacing=8):
+                 reverse=True, integer=True, fontsize=14, spacing=8, bin_size=1):
     x_axis_data, y_axis_data, tick_marks \
         = format_plot_data(answers,
                            tick_threshold=tick_threshold, reverse=reverse,
-                           integer=integer, spacing=spacing)
+                           integer=integer, spacing=spacing, bin_size=bin_size)
 
     fig, axes = plt.subplots(1, 1, figsize=fig_size)
 
@@ -1149,6 +1366,150 @@ def plot_results(answers, tick_threshold=0, fig_size=(10, 5),
     else:
         axes.set_xticklabels(tick_marks, fontsize=fontsize, rotation=70)
 
-    plt.bar(x_axis_data, y_axis_data)
+    plt.bar(x_axis_data, y_axis_data, width=4)
     plt.xticks(tick_marks)
     plt.show()
+
+
+def factor_int(n):
+    step = lambda x: 1 + (x << 2) - ((x >> 1) << 1)
+    maxq = int(floor(sqrt(n)))
+    d = 1
+    q = 2 if n % 2 == 0 else 3
+    while q <= maxq and n % q != 0:
+        q = step(d)
+        d += 1
+    return [q] + factor_int(n // q) if q <= maxq else [n]
+
+
+def test_period(a, period, nilf):
+    a = int(a)
+    period = int(period)
+
+    t1 = pow(a, period, nilf)
+    t2 = pow(a, 2 * period, nilf)
+
+    if t1 == t2:
+        return period
+    return -1
+
+
+def egcd(a, b):
+    if a == 0:
+        return (b, 0, 1)
+    else:
+        g, y, x = egcd(b % a, a)
+        return (g, x - (b // a) * y, y)
+
+
+def mod_div(m, n, nilf):
+    (g, a, b) = egcd(m, nilf)
+    if not g == 1:
+        return -1
+
+    return a * n % nilf
+
+
+def binary_powers(nilf, base=2):
+    ar = []
+    max_power = int(log(nilf, 2) + 1)
+    for k in range(max_power + 1):
+        val = pow(base, 2 ** k, nilf)
+        ar.append(val)
+    return ar
+
+
+def get_powers(val, nilf, base=2):
+    size = int(log(val, 2) + 2)
+    ar = binary_powers(nilf, base)
+    ret = 'print (( '
+    for k in range(size):
+        pos = 2 ** k
+        if pos & val > 0:
+            ret = ret + str(pow(base, pos, nilf)) + ' * '
+    ret = ret[:-2]
+    return ret + ') % nilf )'
+
+
+def inverse_powers(nilf):
+    ar = []
+    inv = mod_inverse(2, nilf)
+    max_power = int(log(nilf, 2) + 1)
+    for k in range(max_power + 1):
+        val = pow(inv, 2 ** k, nilf)
+        ar.append(val)
+    return ar
+
+
+def get_inverse_powers(val, nilf):
+    size = int(log(val, 2) + 2)
+    ar = inverse_powers(nilf)
+    inv = mod_inverse(2, nilf)
+    ret = '( '
+    for k in range(size):
+        pos = 2 ** k
+        if pos & val > 0:
+            ret = ret + str(pow(inv, pos, nilf)) + ' * '
+    ret = ret[:-2]
+    return ret + ') % nilf'
+
+
+def int_prod(ar):
+    # numpy has 64 bit limit, so use this
+    ret = 1
+    for x in ar:
+        ret *= x
+    return ret
+
+
+def find_period(nilf, base=2):
+    ar_factors = []
+    a, b = primefactors(nilf)
+    factors = factorint((a - 1) * (b - 1))
+    for f, v in factors.items():
+        for k in range(v):
+            ar_factors.append(f)
+
+    for k in range(len(ar_factors)):
+        old = ar_factors[k]
+        ar_factors[k] = 1
+        if not pow(base, int_prod(ar_factors), nilf) == 1:
+            ar_factors[k] = old
+    return int_prod(ar_factors)
+
+
+def get_nilf(a, b):
+    nilf = prime(a) * prime(b)
+    period = find_period(nilf)
+    return nilf, period
+
+
+def nilf_stat(nilf):
+    """
+    Prints information about a Number I'd Like to Factor (nilf).
+    :param nilf: Number I'd Like to Factor
+    :return: True/False whether it can be factored by period finding in base 2.
+    """
+    bit_size = len('{0:b}'.format(nilf)) + 1
+    factors = primefactors(nilf)
+
+    period_factors = primefactors((factors[0] - 1) * (factors[1] - 1))
+    print(nilf)
+    print('bit_size:', bit_size, 'factors:', factors, 'period_factors:', period_factors)
+    print('Full factors:', factorint((factors[0] - 1) * (factors[1] - 1)))
+
+    period = find_period(nilf, base=2)
+
+    p = pow(2, period // 2, nilf)
+    g1 = gcd(p - 1, nilf)
+    g2 = gcd(p + 1, nilf)
+
+    shors = False
+    # only even periods are considered
+    if period // 2 == period / 2:
+        if (g1 > 1 and g1 < nilf) or (g2 > 1 and g2 < nilf):
+            shors = True
+    print('Shors base 2:', shors, ', Period:', period)
+    return shors
+
+
